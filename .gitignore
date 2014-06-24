@@ -1,0 +1,5 @@
+bin/*
+dns-time/*
+seq-time/*
+*.pcap
+*.csv
