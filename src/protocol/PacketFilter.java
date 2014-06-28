@@ -35,6 +35,8 @@ public class PacketFilter
 	public static final int TCP_SEQ_INDEX = 38;
 	public static final int TCP_HEAD_AND_FLAG_INDEX = 46;
 	
+	public static final int SSL_HANDSHAKE = 22;
+	public static final int SSL_CIPHER_SPEC = 20;
 	public static final int SSL_CONTENT_APPDATA = 23;
 	
 	public static final int TCP_HEAD_START_INDEX = 34;
@@ -107,6 +109,11 @@ public class PacketFilter
 					System.out.println("read packet error!");
 					break;
 				}
+				if (caplen != len)
+				{
+					System.out.println("capture data not enough!");
+					break;
+				}
 				bf.clear();
 				bf.put(buf, 0, read);
 				
@@ -114,7 +121,7 @@ public class PacketFilter
 				{
 				case LIBPCAP_LINKTYPE_ETHERNET:
 				{
-					SockPacket packet = filt(bf, read, len, time, 0);
+					SockPacket packet = filt(bf, len, time, 0);
 					if (packet != null)
 					{
 						ret.add(packet);
@@ -123,7 +130,7 @@ public class PacketFilter
 				}
 				case LIBPCAP_LINKTYPE_LINUX_SLL:
 				{
-					SockPacket packet = filt(bf, read, len, time, LINUX_SLL_OFFSET);
+					SockPacket packet = filt(bf, len, time, LINUX_SLL_OFFSET);
 					if (packet != null)
 					{
 						ret.add(packet);
@@ -152,7 +159,7 @@ public class PacketFilter
 		{
 			e.printStackTrace();
 		}
-//		out.println(count + " packets");
+		System.out.println(count + " packets");
 		return ret;
 	}
 	
@@ -259,7 +266,7 @@ public class PacketFilter
 	 * decide a whether a packet belongs to one connection
 	 * of this program, according to the connection log
 	 * */
-	protected SockPacket filt(ByteBuffer bf, int caplen, int len, double time, int linkHeadOff)
+	protected SockPacket filt(ByteBuffer bf, int len, double time, int linkHeadOff)
 	{
 		SockPacket ret = null;
 				
@@ -330,8 +337,10 @@ public class PacketFilter
 						packType = SockPacket.TCP_PACK_TYPE_ACK;
 					}
 					
+					byte[] payload = new byte[datalen];
+					System.arraycopy(bf.array(), len - datalen, payload, 0, datalen);
 					SockPacket packet = new SockPacket(srcPort, dstPort, srcIP, dstIP, 
-							time, len, datalen, packType, seq);
+							time, len, datalen, packType, seq, payload);
 					
 //					if (Util.ipInt2Str(dstIP).equals("107.22.197.31") && srcPort == 6899)
 //					System.out.println(packet);

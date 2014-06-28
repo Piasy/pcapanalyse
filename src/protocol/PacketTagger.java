@@ -21,7 +21,8 @@ public class PacketTagger
 		ArrayList<Connection> api_notify = new ArrayList<Connection>();
 		ArrayList<Connection> api_content = new ArrayList<Connection>();
 		Pattern clientP = Pattern.compile("^client\\d*\\.dropbox\\.com$");
-		Pattern dl_clientP = Pattern.compile("^dl-client\\d*\\.dropbox\\.com$");
+		//Pattern dl_clientP = Pattern.compile("^dl-client\\d*\\.dropbox\\.com$");
+		Pattern dl_clientP = Pattern.compile("^dl-.+\\d*\\.dropbox\\.com$");
 		Pattern notifyP = Pattern.compile("^notify\\d*\\.dropbox\\.com$");
 		
 		for (Connection conn : conns)
@@ -234,6 +235,8 @@ public class PacketTagger
 		for (Connection conn : ret.keySet())
 		{
 			conn.packets = ret.get(conn);
+//			conn.sortBySeq();
+//			conn.reTagBySSL();
 			conn.calc();
 		}
 		

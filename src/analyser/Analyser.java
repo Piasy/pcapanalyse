@@ -71,7 +71,9 @@ public class Analyser
 //			double start_t = filter.getStartTime();
 			double first_t = filter.getFirstTime();
 			ArrayList<DNSRecord> records = filter.getDNSRecords();
-//			out.println("Step 1: filt, " + packets.size() + " packets");
+			System.out.println("Step 1: filt, " + packets.size() + " packets");
+			
+			
 //			out.println(records.size() + " dns records:\n");
 //			for (DNSRecord record : records)
 //			{
@@ -83,11 +85,13 @@ public class Analyser
 			seq_time.mkdir();
 			File dns_time = new File("dns-time");
 			dns_time.mkdir();
+			
+			
 			//step 2: tag packets by connections
 			PacketTagger tagger = new PacketTagger();
 			long totalUpSize = 0, totalDownSize = 0;
 			HashMap<Connection, ArrayList<SockPacket>> connTaggedPackets = tagger.tagByConn(packets, connections);
-//			out.println("Step 2: tag by conns, " + connTaggedPackets.size() + " types");
+			System.out.println("Step 2: tag by conns, " + connTaggedPackets.size() + " types");
 			for (Connection conn : connTaggedPackets.keySet())
 			{
 //				if (Util.ipInt2Str(conn.dstIP).equals("108.160.166.10") && conn.srcPort == 52214)
@@ -111,10 +115,12 @@ public class Analyser
 					+ "upDataSize,downDataSize,up throughput,down throughput,"
 					+ "netTime,"
 					+ "upGoodSize,downGoodSize,up goodput,down goodput");
+			
+			//step 3: tag conns by dns
 			HashMap<String, ArrayList<Connection>> dnsTaggedConns = tagger.tagConnByDNS(connections, records);
 			PrintStream time6out = new PrintStream(new File("data.csv"));
-//			time6out.println("synTime - baseTime,firstDataTime - synTime,lastDataTime - firstDataTime,"
-//					+ "finTime - lastDataTime,rstTime - finTime");
+			//time6out.println("synTime - baseTime,firstDataTime - synTime,lastDataTime - firstDataTime,"
+			//		+ "finTime - lastDataTime,rstTime - finTime");
 			for (String name : dnsTaggedConns.keySet())
 			{
 				for (Connection conn : dnsTaggedConns.get(name))
@@ -124,6 +130,17 @@ public class Analyser
 				}
 			}
 			
+			//step 4: extract ssl fragment
+//			for (String name : dnsTaggedConns.keySet())
+//			{
+//				for (Connection conn : dnsTaggedConns.get(name))
+//				{
+//					conn.sortBySeq();
+//					System.out.println("========================");
+//				}
+//			}
+			
+			//step 5: output total data goodput
 			PrintStream totalGoodputout = new PrintStream(new File("totalGoodput.csv"));
 			double dataStreamSyn = -1, dataStreamLastData = -1;
 			long totalSize = 0;
@@ -170,7 +187,6 @@ public class Analyser
 
 				totalSize += conn.downSeqEnd + conn.upSeqEnd;
 			}
-//			System.out.println(totalSize + " " + (dataStreamLastData - dataStreamSyn));
 			if (dataStreamLastData != -1 && dataStreamSyn != -1)
 			{
 				totalGoodputout.println(Util.scaleTo2bit((double) totalSize / (dataStreamLastData - dataStreamSyn)));
@@ -179,13 +195,13 @@ public class Analyser
 			{
 				totalGoodputout.println(Float.NaN);
 			}
+			totalGoodputout.close();
 			
-			//step 3: tag packets by dns
+			//step 6: tag packets by dns
 			HashMap<String, ArrayList<SockPacket>> merged = tagger.mergeDNSTag(packets, records);
 			for (String key : merged.keySet())
 			{
 				ArrayList<SockPacket> ps = merged.get(key);
-//				System.out.println("\tTag " + key + " : " + ps.size() + " packets");
 				
 				PrintWriter pw1 = new PrintWriter(new File("dns-time/dns_" + key + "_conn_down"));
 				PrintWriter pw12 = new PrintWriter(new File("dns-time/dns_" + key + "_conn_up"));
@@ -241,7 +257,6 @@ public class Analyser
 			}*/
 			out.close();
 			time6out.close();
-			totalGoodputout.close();
 		}
 		catch (FileNotFoundException e1)
 		{

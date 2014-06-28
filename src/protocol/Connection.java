@@ -4,8 +4,11 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 
+import setting.Setting;
 import util.Util;
 
 public class Connection
@@ -30,6 +33,263 @@ public class Connection
 	public int upDatalen = 0, downDatalen = 0;
 	public long upSeqStart = -1, upSeqEnd = 0, downSeqStart = -1, downSeqEnd = 0;
 	public double synTime = -1, firstDataTime = -1, lastDataTime = -1, finTime = -1, rstTime = -1;
+		
+	ArrayList<SockPacket> upPackets = new ArrayList<SockPacket>();
+	ArrayList<SockPacket> downPackets = new ArrayList<SockPacket>();
+	/**
+	 * sort packets by seq, it should be called before calc!
+	 * */
+	public void sortBySeq()
+	{
+		for (SockPacket p : packets)
+		{
+			if (p.dir == SockPacket.PACKET_DIR_UP)
+			{
+				upPackets.add(p);
+			}
+			else if (p.dir == SockPacket.PACKET_DIR_DOWN)
+			{
+				downPackets.add(p);
+			}
+		}
+
+		PackComparator comparator = new PackComparator();
+		Collections.sort(upPackets, comparator);
+		Collections.sort(downPackets, comparator);
+		
+		//to relative seq
+		if (upPackets.size() != 0)
+		{
+			long upSeqStart = upPackets.get(0).seq;
+			for (SockPacket p : upPackets)
+			{
+				p.seq = p.seq - upSeqStart;
+			}
+		}
+		if (downPackets.size() != 0)
+		{
+			long downSeqStart = downPackets.get(0).seq;
+			for (SockPacket p : downPackets)
+			{
+				p.seq = p.seq - downSeqStart;
+			}
+		}
+	}
+	
+	protected boolean overlaped(SockPacket pf, SockPacket pa)
+	{
+		return (pf.seq <= pa.seq) && (pa.seq < pf.seq + pf.datalen);
+	}
+	
+	ArrayList<SSLFragment> upFragments = new ArrayList<SSLFragment>();
+	ArrayList<SSLFragment> downFragments = new ArrayList<SSLFragment>();
+	public void reTagBySSL()
+	{
+		if (srcPort != 443 && dstPort != 443)
+		{
+			return;
+		}
+		reTagOneDir(upPackets, upFragments);
+		reTagOneDir(downPackets, downFragments);
+
+//		int xxxx = 1;
+		for (SSLFragment f : upFragments)
+		{
+			f.calc();
+			System.out.println(f);
+//			System.out.println("up Fregment " + xxxx);
+//			xxxx ++;
+		}
+//		xxxx = 1;
+		for (SSLFragment f : downFragments)
+		{
+			f.calc();
+			System.out.println(f);
+//			System.out.println("down Fregment " + xxxx);
+//			for (SockPacket p : f.packets)
+//			{
+//				System.out.println("\t\t" + p);
+//			}
+//			xxxx ++;
+		}
+//		System.out.println("==============================");
+	}
+	
+	protected void reTagOneDir(ArrayList<SockPacket> packets, ArrayList<SSLFragment> fragments)
+	{
+		int i = 1;
+		ByteBuffer bf = ByteBuffer.allocate(Setting.BUF_SIZE);
+		
+		if (packets.size() > 1)
+		{
+			bf.clear();
+			bf.put(packets.get(i).payload);
+			int index = 0;	//pointer to fragment start
+			int len = 0;
+			boolean littleLeft = false;
+			int left = 0;
+			while (i < packets.size())
+			{
+				if (overlaped(packets.get(i - 1), packets.get(i)))
+				{
+					packets.get(i).type = packets.get(i - 1).type;
+				}
+				
+//				System.out.println(i + " : org = " + packets.get(i).type);
+				if ((packets.get(i).type == SockPacket.TCP_PACK_TYPE_DATA
+				  || packets.get(i).type == SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE)
+						&& !overlaped(packets.get(i - 1), packets.get(i)))
+				{
+					int contentType = ((int) bf.get(index) + 256) % 256;
+//					System.out.println(i + " : cur = " + contentType + ", index = " + index);
+					if (contentType == PacketFilter.SSL_CIPHER_SPEC 
+					 || contentType == PacketFilter.SSL_HANDSHAKE)
+					{
+//						System.out.println(i + " : HANDSHAKE");
+						packets.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE;
+						i ++;
+						if (i < packets.size())
+						{
+							bf.clear();
+							bf.put(packets.get(i).payload);
+							index = 0;
+							len = 0;
+						}
+					}
+					else if (contentType == PacketFilter.SSL_CONTENT_APPDATA)
+					{
+//						System.out.println(i + " : DATA");
+						packets.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
+						
+						if (littleLeft)
+						{
+							littleLeft = false;
+							len = ((int) bf.getShort(index + 3) + 65536) % 65536 + 5 - left;
+						}
+						else
+						{
+							len += ((int) bf.getShort(index + 3) + 65536) % 65536 + 5;	//including ssl header
+						}
+						
+//						System.out.println("len = " + len + ", index = " + index);
+						ArrayList<SockPacket> fragPackets = new ArrayList<SockPacket>();
+						fragPackets.add(packets.get(i));
+						if (len == packets.get(i).payload.length)
+						{
+							fragments.add(new SSLFragment(fragPackets));
+							i ++;
+							if (i < packets.size())
+							{
+								bf.clear();
+								bf.put(packets.get(i).payload);
+								index = 0;
+								len = 0;
+							}
+						}
+						else
+						{
+							boolean restart = false;
+							while (i < packets.size() && len != packets.get(i).payload.length)
+							{
+								if (packets.get(i).payload.length < len)
+								{
+									len -= packets.get(i).payload.length;
+									
+									i ++;
+									while (i < packets.size() && overlaped(packets.get(i - 1), packets.get(i)))
+									{//re-transmitted packets
+										fragPackets.add(packets.get(i));
+//										System.out.println(i + " : dup DATA");
+										packets.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
+										i ++;
+									}
+									
+									if (i < packets.size())
+									{
+//										System.out.println(i + " : continue");
+//										System.out.println(i + " : DATA");
+										packets.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
+										fragPackets.add(packets.get(i));
+									}
+								}
+								else if (packets.get(i).payload.length > len)
+								{
+									fragments.add(new SSLFragment(fragPackets));
+									
+									if (packets.get(i).payload.length >= len + 5)
+									{
+//										System.out.println(i + " : restart");
+										bf.clear();
+										bf.put(packets.get(i).payload);
+										fragPackets = new ArrayList<SockPacket>();
+										fragPackets.add(packets.get(i));
+									}
+									else
+									{
+//										System.out.println(i + " : restart, but left little");
+										littleLeft = true;
+										left = packets.get(i).payload.length - len;
+//										System.out.println("left = " + left);
+										bf.clear();	//!clear former payload
+										bf.put(packets.get(i).payload);	//!and re-put current payload
+										fragPackets = new ArrayList<SockPacket>();
+										fragPackets.add(packets.get(i));
+										i ++;
+										bf.put(packets.get(i).payload);	//!and next payload
+										fragPackets.add(packets.get(i));
+									}
+									index = len;
+									restart = true;
+									break;
+								}
+							}
+							
+							if (!restart)
+							{
+//								System.out.println(i + " : finish");
+								fragments.add(new SSLFragment(fragPackets));
+								i ++;
+								if (i < packets.size())
+								{
+//									System.out.println("before clear, type = " + (((int) bf.get(0) + 256) % 256));
+									bf.clear();
+									bf.put(packets.get(i).payload);
+//									int ttt = (((int) bf.get(0) + 256) % 256);
+//									System.out.println("after clear, type = " + ttt);
+									index = 0;
+									len = 0;
+								}
+							}
+						}
+					}
+					else
+					{
+//						System.out.println(i + " : UNKNOWN");
+						packets.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_UNKNOWN;
+						i ++;
+						if (i < packets.size())
+						{
+							bf.clear();
+							bf.put(packets.get(i).payload);
+							index = 0;
+							len = 0;
+						}
+					}
+				}
+				else
+				{
+					i ++;
+					if (i < packets.size())
+					{
+						bf.clear();
+						bf.put(packets.get(i).payload);
+						index = 0;
+						len = 0;
+					}
+				}
+			}
+		}
+	}
 	
 	public void calc()
 	{
