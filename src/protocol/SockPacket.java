@@ -29,6 +29,8 @@ public class SockPacket
 	
 	public byte[] payload;
 	
+	public boolean dup = false;
+	
 	public SockPacket(int srcPort, int dstPort, 
 			int srcIP, int dstIP, 
 			double time, int length,
@@ -58,6 +60,10 @@ public class SockPacket
 			 + ", datalen = " + datalen
 			 + ", seq = " + seq
 			 + ", type = ";
+		if (dup)
+		{
+			ret += "(DUP)";
+		}
 		switch (type)
 		{
 		case TCP_PACK_TYPE_RAW:

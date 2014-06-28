@@ -131,14 +131,14 @@ public class Analyser
 			}
 			
 			//step 4: extract ssl fragment
-//			for (String name : dnsTaggedConns.keySet())
-//			{
-//				for (Connection conn : dnsTaggedConns.get(name))
-//				{
-//					conn.sortBySeq();
-//					System.out.println("========================");
-//				}
-//			}
+			for (String name : dnsTaggedConns.keySet())
+			{
+				for (Connection conn : dnsTaggedConns.get(name))
+				{
+					conn.sortBySeq();
+					System.out.println("========================");
+				}
+			}
 			
 			//step 5: output total data goodput
 			PrintStream totalGoodputout = new PrintStream(new File("totalGoodput.csv"));

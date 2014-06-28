@@ -78,11 +78,28 @@ public class Connection
 	
 	protected boolean overlaped(SockPacket pf, SockPacket pa)
 	{
+//		System.out.println(pf.seq + " " + pa.seq + " " + (pf.seq + pf.datalen));
 		return (pf.seq <= pa.seq) && (pa.seq < pf.seq + pf.datalen);
+	}
+	
+	protected int lastUniqueIndex(ArrayList<SockPacket> packets, int start)
+	{
+		for (int i = start - 1; i >= 0; i --)
+		{
+			if (!packets.get(i).dup)
+			{
+				return i;
+			}
+		}
+		
+		//this exit point shouldn't be reached
+		return start - 1;
 	}
 	
 	ArrayList<SSLFragment> upFragments = new ArrayList<SSLFragment>();
 	ArrayList<SSLFragment> downFragments = new ArrayList<SSLFragment>();
+
+	int xxxx = 1;
 	public void reTagBySSL()
 	{
 		if (srcPort != 443 && dstPort != 443)
@@ -91,28 +108,38 @@ public class Connection
 		}
 		reTagOneDir(upPackets, upFragments);
 		reTagOneDir(downPackets, downFragments);
+		
+		for (SockPacket p : upPackets)
+		{
+			System.out.println(xxxx + " : " + p);
+			xxxx ++;
+		}
+		for (SockPacket p : downPackets)
+		{
+			System.out.println(xxxx + " : " + p);
+			xxxx ++;
+		}
 
-//		int xxxx = 1;
-		for (SSLFragment f : upFragments)
-		{
-			f.calc();
-			System.out.println(f);
-//			System.out.println("up Fregment " + xxxx);
-//			xxxx ++;
-		}
-//		xxxx = 1;
-		for (SSLFragment f : downFragments)
-		{
-			f.calc();
-			System.out.println(f);
-//			System.out.println("down Fregment " + xxxx);
-//			for (SockPacket p : f.packets)
-//			{
-//				System.out.println("\t\t" + p);
-//			}
-//			xxxx ++;
-		}
-//		System.out.println("==============================");
+//		for (SSLFragment f : upFragments)
+//		{
+//			f.calc();
+//			System.out.println(f);
+////			System.out.println("up Fregment " + xxxx);
+////			xxxx ++;
+//		}
+////		xxxx = 1;
+//		for (SSLFragment f : downFragments)
+//		{
+//			f.calc();
+//			System.out.println(f);
+////			System.out.println("down Fregment " + xxxx);
+////			for (SockPacket p : f.packets)
+////			{
+////				System.out.println("\t\t" + p);
+////			}
+////			xxxx ++;
+//		}
+////		System.out.println("==============================");
 	}
 	
 	protected void reTagOneDir(ArrayList<SockPacket> packets, ArrayList<SSLFragment> fragments)
@@ -130,15 +157,28 @@ public class Connection
 			int left = 0;
 			while (i < packets.size())
 			{
-				if (overlaped(packets.get(i - 1), packets.get(i)))
+				int lastUniqueIndex = lastUniqueIndex(packets, i);
+				if (overlaped(packets.get(lastUniqueIndex), packets.get(i)))
 				{
+					packets.get(i).dup = true;
 					packets.get(i).type = packets.get(i - 1).type;
+//					System.out.println("dup! " + i);
+					
+					i ++;
+					if (i < packets.size())
+					{
+						bf.clear();
+						bf.put(packets.get(i).payload);
+						index = 0;
+						len = 0;
+					}
+					continue;
 				}
 				
 //				System.out.println(i + " : org = " + packets.get(i).type);
 				if ((packets.get(i).type == SockPacket.TCP_PACK_TYPE_DATA
 				  || packets.get(i).type == SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE)
-						&& !overlaped(packets.get(i - 1), packets.get(i)))
+						&& !overlaped(packets.get(lastUniqueIndex), packets.get(i)))
 				{
 					int contentType = ((int) bf.get(index) + 256) % 256;
 //					System.out.println(i + " : cur = " + contentType + ", index = " + index);
@@ -196,7 +236,7 @@ public class Connection
 									len -= packets.get(i).payload.length;
 									
 									i ++;
-									while (i < packets.size() && overlaped(packets.get(i - 1), packets.get(i)))
+									while (i < packets.size() && overlaped(packets.get(lastUniqueIndex), packets.get(i)))
 									{//re-transmitted packets
 										fragPackets.add(packets.get(i));
 //										System.out.println(i + " : dup DATA");
