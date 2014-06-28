@@ -30,12 +30,10 @@ public class Connection
 	}
 	
 	public ArrayList<SockPacket> packets = new ArrayList<SockPacket>();
-	public int upDatalen = 0, downDatalen = 0;
-	public long upSeqStart = -1, upSeqEnd = 0, downSeqStart = -1, downSeqEnd = 0;
+	public int upDatalen = 0, downDatalen = 0;	
+	public long upSeqEnd = 0, downSeqEnd = 0;
 	public double synTime = -1, firstDataTime = -1, lastDataTime = -1, finTime = -1, rstTime = -1;
 		
-	ArrayList<SockPacket> upPackets = new ArrayList<SockPacket>();
-	ArrayList<SockPacket> downPackets = new ArrayList<SockPacket>();
 	/**
 	 * sort packets by seq, it should be called before calc!
 	 * */
@@ -330,8 +328,224 @@ public class Connection
 			}
 		}
 	}
-	
+
+	ArrayList<SockPacket> upPackets = new ArrayList<SockPacket>();
+	ArrayList<SockPacket> downPackets = new ArrayList<SockPacket>();
+	ArrayList<SockPacket> upPackStream = new ArrayList<SockPacket>();
+	ArrayList<SockPacket> downPackStream = new ArrayList<SockPacket>();
 	public void calc()
+	{
+		norm();
+		rebuildPackSeq(upPackets, downPackets, upPackStream);
+		rebuildPackSeq(downPackets, upPackets, downPackStream);
+	}
+
+	public long upSeqStart = -1, upAckStart = -1, downSeqStart = -1, downAckStart = -1;
+	protected void norm()
+	{
+		long formerUp = 0, formerDown = 0;
+		for (int i = 0; i < packets.size(); i ++)
+		{
+			SockPacket p = packets.get(i);
+			if (p.dir == SockPacket.PACKET_DIR_UP)
+			{
+				if (upSeqStart == -1)
+				{
+					upSeqStart = p.seq;
+				}
+				p.seq -= upSeqStart;
+				if (p.ackbit && upAckStart == -1)
+				{
+					upAckStart = p.ack;
+				}
+				p.ack -= (upAckStart - 1);
+				
+				if (p.seq - formerUp > SockPacket.MAX_PAYLOAD || p.seq < 0)
+				{
+					p.seq = 0;
+					p.ackbit = false;
+				}
+				else
+				{
+					formerUp = p.seq;
+				}
+				upPackets.add(p);
+			}
+			else if (p.dir == SockPacket.PACKET_DIR_DOWN)
+			{
+				if (downSeqStart == -1)
+				{
+					downSeqStart = p.seq;
+				}
+				p.seq = p.seq - downSeqStart;
+				if (p.ackbit && downAckStart == -1)
+				{
+					downAckStart = p.ack;
+				}
+				p.ack -= (downAckStart - 1);
+				
+				if (p.seq - formerDown > SockPacket.MAX_PAYLOAD || p.seq < 0)
+				{
+					p.seq = 0;
+					p.ackbit = false;
+				}
+				else
+				{
+					formerDown = p.seq;
+				}
+				downPackets.add(p);
+			}
+		}
+	}
+	
+	/**
+	 * data: up => down
+	 * */
+	protected void rebuildPackSeq(ArrayList<SockPacket> ups, ArrayList<SockPacket> downs, ArrayList<SockPacket> stream)
+	{
+		ArrayList<SockPacket> packs = new ArrayList<SockPacket>();
+		ArrayList<SockPacket> acks = new ArrayList<SockPacket>();
+		for (SockPacket p : ups)
+		{
+			if (p.type != SockPacket.TCP_PACK_TYPE_ACK)
+			{
+				packs.add(p);
+			}
+		}
+		Collections.sort(packs, new SockPacket.PackSeqComparator());
+		
+//		for (SockPacket p : packs)
+//		{
+//			System.out.println(p);
+//		}
+		
+		for (SockPacket p : downs)
+		{
+			if (p.ackbit && (acks.size() == 0 
+						  || acks.get(acks.size() - 1).ack != p.ack))
+			{
+				acks.add(p);
+			}
+		}
+		Collections.sort(acks, new SockPacket.PackAckComparator());
+
+//		for (SockPacket p : acks)
+//		{
+//			System.out.println(p);
+//		}
+		
+		for (int i = packs.size() - 1; i >= 0; i --)
+		{
+			if (acks.size() != 0 && matched(acks.get(acks.size() - 1), packs.get(i)))
+			{
+				ArrayList<SockPacket> tmp = new ArrayList<SockPacket>();
+				int hi = i;
+				tmp.add(packs.get(hi));
+				for (int j = i - 1; j >= 0; j --)
+				{
+					if (continuous(packs.get(hi), packs.get(j)))
+					{
+						tmp.add(packs.get(j));
+						hi = j;
+					}
+				}
+				
+				for (int j = tmp.size() - 1; j >= 0; j --)
+				{
+					stream.add(tmp.get(j));
+				}
+				
+				break;
+			}
+		}
+		
+		/*int lastP = 0, curP = -1;
+		for (SockPacket ack : acks)
+		{
+			boolean found = false;
+			for (int i = curP + 1; i < packs.size(); i ++)
+			{
+				if (matched(ack, packs.get(i)))
+				{
+					lastP = curP;
+					curP = i;
+					found = true;
+					break;
+				}
+			}
+			
+			if (!found)
+			{
+				System.out.println("Error, ack doesn't match any packet!");
+				System.out.println(ack);
+			}
+			else
+			{
+				if (curP - lastP == 1)
+				{
+					stream.add(packs.get(curP));
+				}
+				else
+				{
+					ArrayList<SockPacket> tmp = new ArrayList<SockPacket>();
+					int hi = curP;
+					tmp.add(packs.get(hi));
+					for (int i = curP - 1; i > lastP; i --)
+					{
+						//! not only continuous with the packet behind,
+						//but also the last packet in stream
+						if (continuous(packs.get(hi), packs.get(i)))
+						{
+							tmp.add(packs.get(i));
+							hi = i;
+						}
+					}
+					
+					int index;
+					for (index = tmp.size() - 1; index >= 0; index --)
+					{
+						if (stream.size() == 0 
+						 || continuous(tmp.get(index), stream.get(stream.size() - 1)))
+						{
+							break;
+						}
+					}
+					for (int i = index; i >= 0; i --)
+					{
+						stream.add(tmp.get(index));
+					}
+				}
+			}
+		}*/
+		
+		for (SockPacket p : stream)
+		{
+			System.out.println(p);
+		}
+	}
+	
+	protected boolean matched(SockPacket ack, SockPacket pack)
+	{
+//		System.out.println("ack : " + ack);
+//		System.out.println("pack : " + pack);
+//		System.out.println(ack.ack + " " + (pack.seq + pack.datalen));
+		
+		if (pack.type == SockPacket.TCP_PACK_TYPE_SYN)
+		{
+			return ack.ack == pack.seq + 1;
+		}
+		else
+		{
+			return ack.ack == pack.seq + pack.datalen;
+		}
+	}
+	
+	protected boolean continuous(SockPacket pa, SockPacket pf)
+	{
+		return pa.seq == pf.seq + pf.datalen;
+	}
+	
+	public void calc2()
 	{
 
 		long formerUp = 0, formerDown = 0;

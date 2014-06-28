@@ -1,5 +1,7 @@
 package protocol;
 
+import java.util.Comparator;
+
 import util.Util;
 
 public class SockPacket
@@ -9,7 +11,7 @@ public class SockPacket
 	public double time;
 	public int length;
 	public int datalen;
-	public long seq;
+	public long seq, ack;
 	
 	public static final int MAX_PAYLOAD = 1024 * 1024;
 	
@@ -30,11 +32,12 @@ public class SockPacket
 	public byte[] payload;
 	
 	public boolean dup = false;
+	public boolean ackbit = false;
 	
 	public SockPacket(int srcPort, int dstPort, 
 			int srcIP, int dstIP, 
 			double time, int length,
-			int datalen, int type, long seq, byte[] payload)
+			int datalen, int type, long seq, long ack, boolean ackbit, byte[] payload)
 	{
 		this.srcIP = srcIP;
 		this.dstIP = dstIP;
@@ -45,6 +48,8 @@ public class SockPacket
 		this.datalen = datalen;
 		this.type = type;
 		this.seq = seq;
+		this.ack = ack;
+		this.ackbit = ackbit;
 		this.payload = payload;
 	}
 	
@@ -59,6 +64,7 @@ public class SockPacket
 			 + ", length = " + length
 			 + ", datalen = " + datalen
 			 + ", seq = " + seq
+			 + ", ack = " + ack
 			 + ", type = ";
 		if (dup)
 		{
@@ -92,5 +98,69 @@ public class SockPacket
 			break;
 		}
 		return ret;
+	}
+	
+	public static class PackSeqComparator implements Comparator<SockPacket>
+	{
+
+		@Override
+		public synchronized int compare(SockPacket o1, SockPacket o2)
+		{
+			if (o1.seq == o2.seq)
+			{
+				if (o1.time == o2.time)
+				{
+					return 0;
+				}
+				else if (o1.time < o2.time)
+				{
+					return -1;
+				}
+				else
+				{
+					return 1;
+				}
+			}
+			else if (o1.seq < o2.seq)
+			{
+				return -1;
+			}
+			else
+			{
+				return 1;
+			}
+		}
+	}
+	
+	public static class PackAckComparator implements Comparator<SockPacket>
+	{
+
+		@Override
+		public synchronized int compare(SockPacket o1, SockPacket o2)
+		{
+			if (o1.ack == o2.ack)
+			{
+				if (o1.time == o2.time)
+				{
+					return 0;
+				}
+				else if (o1.time < o2.time)
+				{
+					return -1;
+				}
+				else
+				{
+					return 1;
+				}
+			}
+			else if (o1.ack < o2.ack)
+			{
+				return -1;
+			}
+			else
+			{
+				return 1;
+			}
+		}
 	}
 }

@@ -33,6 +33,7 @@ public class PacketFilter
 	public static final int SOCKET_SRC_PORT_INDEX = 34;
 	public static final int SOCKET_DST_PORT_INDEX = 36;
 	public static final int TCP_SEQ_INDEX = 38;
+	public static final int TCP_ACK_INDEX = 42;
 	public static final int TCP_HEAD_AND_FLAG_INDEX = 46;
 	
 	public static final int SSL_HANDSHAKE = 22;
@@ -300,7 +301,13 @@ public class PacketFilter
 					seqBf.putInt(bf.getInt(TCP_SEQ_INDEX + linkHeadOff));
 					long seq = seqBf.getLong(0);
 					
+					seqBf.clear();
+					seqBf.putInt(0);
+					seqBf.putInt(bf.getInt(TCP_ACK_INDEX + linkHeadOff));
+					long ack = seqBf.getLong(0);
+					
 					int packType = 0;
+					boolean ackbit = (headAndFlag & 0x00000010) != 0;
 					if ((headAndFlag & 0x00000002) != 0)
 					{
 						packType = SockPacket.TCP_PACK_TYPE_SYN;
@@ -340,7 +347,7 @@ public class PacketFilter
 					byte[] payload = new byte[datalen];
 					System.arraycopy(bf.array(), len - datalen, payload, 0, datalen);
 					SockPacket packet = new SockPacket(srcPort, dstPort, srcIP, dstIP, 
-							time, len, datalen, packType, seq, payload);
+							time, len, datalen, packType, seq, ack, ackbit, payload);
 					
 //					if (Util.ipInt2Str(dstIP).equals("107.22.197.31") && srcPort == 6899)
 //					System.out.println(packet);
