@@ -54,36 +54,66 @@ public class Connection
 			if (upPackets.size() > 0)
 			{
 				SockPacket pu = upPackets.get(upPackets.size() - 1);
-				ByteBuffer upPayload = ByteBuffer.allocate((int) (pu.seq + pu.datalen));
-				int uplen = extractPayload(upPackets, upPayload);
-				extractSSLFrag(upPayload, uplen, upFragments);
-				calcFragTime(upFragments, downAcks);
-				if (upFragments.size() > 0)
+				if (pu.seq + pu.datalen > 0)
 				{
-					lastUpSSLTime = upFragments.get(upFragments.size() - 1).end;
+					ByteBuffer upPayload = ByteBuffer.allocate((int) (pu.seq + pu.datalen));
+					int uplen = extractPayload(upPackets, upPayload);
+					extractSSLFrag(upPayload, uplen, upFragments);
+					calcFragTime(upFragments, downAcks);
+					if (upFragments.size() > 0)
+					{
+						//lastUpSSLTime = upFragments.get(upFragments.size() - 1).end;
+						for (int i = upFragments.size() - 1; i >= 0; i --)
+						{
+							if (upFragments.get(i).end != -1)
+							{
+								lastUpSSLTime = upFragments.get(i).end;
+								break;
+							}
+						}
+					}
+					
+//					System.out.println("uplen = " + uplen + ", " + upPackets.size() + ", " + (pu.seq + pu.datalen));
+//					for (int i = 0; i < uplen; i ++)
+//					{
+//						System.out.print(upPayload.get(i) + " ");
+//						if (i > 700)
+//						{
+//							break;
+//						}
+//					}
+//					System.out.println("============================");
 				}
-				
-				System.out.println("uplen = " + uplen);
-				for (int i = 0; i < uplen; i ++)
-				{
-					System.out.println(upPayload.get(i) + " ");
-				}
-				System.out.println("============================");
 			}
 			
 			if (downPackets.size() > 0)
 			{
 				SockPacket pd = downPackets.get(downPackets.size() - 1);
-				ByteBuffer downPayload = ByteBuffer.allocate((int) (pd.seq + pd.datalen));
-				int downlen = extractPayload(downPackets, downPayload);
-				extractSSLFrag(downPayload, downlen, downFragments);
-				calcFragTime(downFragments, upAcks);
-				if (downFragments.size() > 0)
+				if (pd.seq + pd.datalen > 0)
 				{
-					lastDownSSLTime = downFragments.get(downFragments.size() - 1).end;
+					ByteBuffer downPayload = ByteBuffer.allocate((int) (pd.seq + pd.datalen));
+					int downlen = extractPayload(downPackets, downPayload);
+					extractSSLFrag(downPayload, downlen, downFragments);
+					calcFragTime(downFragments, upAcks);
+					if (downFragments.size() > 0)
+					{
+						//lastDownSSLTime = downFragments.get(downFragments.size() - 1).end;
+						for (int i = downFragments.size() - 1; i >= 0; i --)
+						{
+							if (downFragments.get(i).end != -1)
+							{
+								lastDownSSLTime = downFragments.get(i).end;
+								break;
+							}
+						}
+					}
 				}
 			}
 		}
+		
+//		System.out.println(this);
+//		System.out.println(upFragments.size() + " " + downFragments.size());
+//		System.out.println(lastUpSSLTime + " " + lastDownSSLTime);
 	}
 	
 	protected ArrayList<SockPacket> extractAcks(ArrayList<SockPacket> packs)
