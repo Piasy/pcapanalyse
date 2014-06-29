@@ -94,15 +94,6 @@ public class Analyser
 			System.out.println("Step 2: tag by conns, " + connTaggedPackets.size() + " types");
 			for (Connection conn : connTaggedPackets.keySet())
 			{
-//				if (Util.ipInt2Str(conn.dstIP).equals("108.160.166.10") && conn.srcPort == 52214)
-//				{//53074--54.221.244.208
-////					out.println(conn.packets.size());
-//					for (SockPacket p : conn.packets)
-//					{
-//						System.out.println(p);
-//					}
-//				}
-				
 				totalUpSize += conn.upSeqEnd;
 				totalDownSize += conn.downSeqEnd;
 			}
@@ -111,9 +102,10 @@ public class Analyser
 
 			out.println("domain name,local ip:local port,remote ip:remote port,"
 					+ "synTime,firstDataTime - synTime,firstDataTime,lastDataTime - firstDataTime,"
-					+ "lastDataTime,finTime - lastDataTime(finish time),finTime,rstTime - finTime,rstTime,"
-					+ "upDataSize,downDataSize,up throughput,down throughput,"
-					+ "netTime,"
+					+ "lastDataTime,finTime - lastDataTime(finish time),"
+					+ "lastUpSSLTime,finTime - lastUpSSLTime,"
+					+ "lastDownSSLTime,finTime - lastDownSSLTime,finTime,rstTime - finTime,rstTime,"
+					+ "netTime,upDataSize,downDataSize,up throughput,down throughput,"
 					+ "upGoodSize,downGoodSize,up goodput,down goodput");
 			
 			//step 3: tag conns by dns
@@ -130,15 +122,7 @@ public class Analyser
 				}
 			}
 			
-			//step 4: extract ssl fragment
-//			for (String name : dnsTaggedConns.keySet())
-//			{
-//				for (Connection conn : dnsTaggedConns.get(name))
-//				{
-//					conn.sortBySeq();
-//					System.out.println("========================");
-//				}
-//			}
+			//step 4: extract ssl fragment, done by step 2, conn.calc()
 			
 			//step 5: output total data goodput
 			PrintStream totalGoodputout = new PrintStream(new File("totalGoodput.csv"));

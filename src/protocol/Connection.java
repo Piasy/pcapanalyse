@@ -33,94 +33,8 @@ public class Connection
 	public int upDatalen = 0, downDatalen = 0;	
 	public long upSeqEnd = 0, downSeqEnd = 0;
 	public double synTime = -1, firstDataTime = -1, lastDataTime = -1, finTime = -1, rstTime = -1;
-		
-	/**
-	 * sort packets by seq, it should be called before calc!
-	 * */
-	public void sortBySeq()
-	{
-		for (SockPacket p : packets)
-		{
-			if (p.dir == SockPacket.PACKET_DIR_UP)
-			{
-				upPackets.add(p);
-			}
-			else if (p.dir == SockPacket.PACKET_DIR_DOWN)
-			{
-				downPackets.add(p);
-			}
-		}
-
-		PackComparator comparator = new PackComparator();
-		Collections.sort(upPackets, comparator);
-		Collections.sort(downPackets, comparator);
-		
-		//to relative seq
-		if (upPackets.size() != 0)
-		{
-			long upSeqStart = upPackets.get(0).seq;
-			for (SockPacket p : upPackets)
-			{
-				p.seq = p.seq - upSeqStart;
-			}
-		}
-		if (downPackets.size() != 0)
-		{
-			long downSeqStart = downPackets.get(0).seq;
-			for (SockPacket p : downPackets)
-			{
-				p.seq = p.seq - downSeqStart;
-			}
-		}
-	}
+	public double lastUpSSLTime = -1, lastDownSSLTime = -1;
 	
-	int xxxx = 1;
-	public void reTagBySSL()
-	{
-		if (srcPort != 443 && dstPort != 443)
-		{
-			return;
-		}
-		reTagOneDir(upPackets, upFragments);
-		reTagOneDir(downPackets, downFragments);
-		
-		for (SockPacket p : upPackets)
-		{
-			System.out.println(xxxx + " : " + p);
-			xxxx ++;
-		}
-		for (SockPacket p : downPackets)
-		{
-			System.out.println(xxxx + " : " + p);
-			xxxx ++;
-		}
-
-//		for (SSLFragment f : upFragments)
-//		{
-//			f.calc();
-//			System.out.println(f);
-////			System.out.println("up Fregment " + xxxx);
-////			xxxx ++;
-//		}
-////		xxxx = 1;
-//		for (SSLFragment f : downFragments)
-//		{
-//			f.calc();
-//			System.out.println(f);
-////			System.out.println("down Fregment " + xxxx);
-////			for (SockPacket p : f.packets)
-////			{
-////				System.out.println("\t\t" + p);
-////			}
-////			xxxx ++;
-//		}
-////		System.out.println("==============================");
-	}
-	
-	protected void reTagOneDir(ArrayList<SockPacket> packets, ArrayList<SSLFragment> fragments)
-	{
-	}
-
 	ArrayList<SockPacket> upPackets = new ArrayList<SockPacket>();
 	ArrayList<SockPacket> downPackets = new ArrayList<SockPacket>();
 	ArrayList<SockPacket> upPackStream = new ArrayList<SockPacket>();
@@ -131,29 +45,53 @@ public class Connection
 	{
 		norm();
 		
-		ArrayList<SockPacket> downAcks = rebuildPackSeq(upPackets, downPackets, upPackStream);
-		ArrayList<SockPacket> upAcks = rebuildPackSeq(downPackets, upPackets, downPackStream);
+//		System.out.println("Connection.calc()");
 		
-		extractSSLFrag(upPackStream, upFragments);
-		extractSSLFrag(downPackStream, downFragments);
+		calc2();
 		
-		calcFragTime(upFragments, downAcks);
-		calcFragTime(downFragments, upAcks);
-		
-//		for (SockPacket p : upPackStream)
-//		{
-//			System.out.println(p);
-//		}
-//		System.out.println("=========================================");
-		
-		for (SSLFragment f : upFragments)
+		if (srcPort == 443 || dstPort == 443)
 		{
-//			f.calc();
-			System.out.println(f);
-		}
-		System.out.println("==============================");
-	}
+//			System.out.println("443");
+			ArrayList<SockPacket> downAcks = rebuildPackSeq(upPackets, downPackets, upPackStream);
+			ArrayList<SockPacket> upAcks = rebuildPackSeq(downPackets, upPackets, downPackStream);
 
+//			System.out.println(upPackStream.size() + " " + downPackStream.size());
+			
+			extractSSLFrag(upPackStream, upFragments);
+			extractSSLFrag(downPackStream, downFragments);
+			
+			System.out.println(upFragments.size() + " " + downFragments.size());
+			
+			calcFragTime(upFragments, downAcks);
+			calcFragTime(downFragments, upAcks);
+			
+
+//			if (Util.ipInt2Str(this.dstIP).equals("107.21.228.70"))
+//			{
+//				for (SSLFragment f : upFragments)
+//				{
+//					System.out.println(f);
+//				}
+//				System.out.println("-------------------------");
+//				for (SSLFragment f : downFragments)
+//				{
+//					System.out.println(f);
+//				}
+//				System.out.println("=========================");
+//			}
+			
+			if (upFragments.size() > 0)
+			{
+				lastUpSSLTime = upFragments.get(upFragments.size() - 1).end;
+			}
+			
+			if (downFragments.size() > 0)
+			{
+				lastDownSSLTime = downFragments.get(downFragments.size() - 1).end;
+			}
+		}
+	}
+	
 	protected void calcFragTime(ArrayList<SSLFragment> fragments, ArrayList<SockPacket> acks)
 	{
 		for (SSLFragment f : fragments)
@@ -223,16 +161,13 @@ public class Connection
 			ArrayList<SockPacket> fragstream = new ArrayList<SockPacket>();
 			while (i < stream.size())
 			{
-//				System.out.println(i + " : org = " + stream.get(i).type);
 				if ((stream.get(i).type == SockPacket.TCP_PACK_TYPE_DATA
 				  || stream.get(i).type == SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE))
 				{
 					int contentType = ((int) bf.get(index) + 256) % 256;
-//					System.out.println(i + " : cur = " + contentType + ", index = " + index);
 					if (contentType == PacketFilter.SSL_CIPHER_SPEC 
 					 || contentType == PacketFilter.SSL_HANDSHAKE)
 					{
-//						System.out.println(i + " : HANDSHAKE");
 						stream.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE;
 						i ++;
 						if (i < stream.size())
@@ -245,7 +180,6 @@ public class Connection
 					}
 					else if (contentType == PacketFilter.SSL_CONTENT_APPDATA)
 					{
-//						System.out.println(i + " : DATA");
 						stream.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
 						
 						if (littleLeft)
@@ -258,7 +192,6 @@ public class Connection
 							len += ((int) bf.getShort(index + 3) + 65536) % 65536 + 5;	//including ssl header
 						}
 						
-//						System.out.println("len = " + len + ", index = " + index);
 						fragstream.add(stream.get(i));
 						if (len == stream.get(i).payload.length)
 						{
@@ -285,8 +218,6 @@ public class Connection
 									i ++;									
 									if (i < stream.size())
 									{
-//										System.out.println(i + " : continue");
-//										System.out.println(i + " : DATA");
 										stream.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
 										fragstream.add(stream.get(i));
 									}
@@ -298,17 +229,14 @@ public class Connection
 									
 									if (stream.get(i).payload.length >= len + 5)
 									{
-//										System.out.println(i + " : restart");
 										bf.clear();
 										bf.put(stream.get(i).payload);
 										//fragstream.add(stream.get(i));	//! it will be added at next iteration
 									}
 									else
 									{
-//										System.out.println(i + " : restart, but left little");
 										littleLeft = true;
 										left = stream.get(i).payload.length - len;
-//										System.out.println("left = " + left);
 										bf.clear();	//!clear former payload
 										bf.put(stream.get(i).payload);	//!and re-put current payload
 										fragstream.add(stream.get(i));
@@ -324,16 +252,12 @@ public class Connection
 							
 							if (!restart)
 							{
-//								System.out.println(i + " : finish");
 								fragments.add(new SSLFragment(fragstream));
 								i ++;
 								if (i < stream.size())
 								{
-//									System.out.println("before clear, type = " + (((int) bf.get(0) + 256) % 256));
 									bf.clear();
 									bf.put(stream.get(i).payload);
-//									int ttt = (((int) bf.get(0) + 256) % 256);
-//									System.out.println("after clear, type = " + ttt);
 									index = 0;
 									len = 0;
 								}
@@ -342,7 +266,6 @@ public class Connection
 					}
 					else
 					{
-//						System.out.println(i + " : UNKNOWN");
 						stream.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_UNKNOWN;
 						i ++;
 						if (i < stream.size())
@@ -444,7 +367,8 @@ public class Connection
 	/**
 	 * data: up => down
 	 * */
-	protected ArrayList<SockPacket> rebuildPackSeq(ArrayList<SockPacket> ups, ArrayList<SockPacket> downs, ArrayList<SockPacket> stream)
+	protected ArrayList<SockPacket> rebuildPackSeq(ArrayList<SockPacket> ups, 
+			ArrayList<SockPacket> downs, ArrayList<SockPacket> stream)
 	{
 		ArrayList<SockPacket> packs = new ArrayList<SockPacket>();
 		ArrayList<SockPacket> acks = new ArrayList<SockPacket>();
@@ -456,11 +380,6 @@ public class Connection
 			}
 		}
 		Collections.sort(packs, new SockPacket.PackSeqComparator());
-		
-//		for (SockPacket p : packs)
-//		{
-//			System.out.println(p);
-//		}
 		
 		ArrayList<SockPacket> tmpAcks = new ArrayList<SockPacket>();
 		for (SockPacket p : downs)
@@ -479,13 +398,9 @@ public class Connection
 				acks.add(p);
 			}
 		}
-
-//		for (SockPacket p : acks)
-//		{
-//			System.out.println(p);
-//		}
 		
 		int ai = acks.size() - 1, pi = packs.size() - 1;
+//		System.out.println("ai, pi = " + ai + ", " + pi);
 		ArrayList<SockPacket> tmp = new ArrayList<SockPacket>();
 		ArrayList<SockPacket> tmp2 = new ArrayList<SockPacket>();
 		long MAX_LEN = 65536;
@@ -586,6 +501,8 @@ public class Connection
 	
 	protected int matched(SockPacket ack, SockPacket pack)
 	{
+//		System.out.println("ack : " + ack);
+//		System.out.println("pack : " + pack);
 		if (pack.type == SockPacket.TCP_PACK_TYPE_SYN)
 		{
 			if (ack.ack == pack.seq + 1)
@@ -593,6 +510,21 @@ public class Connection
 				return 0;
 			}
 			else if (ack.ack > pack.seq + 1)
+			{
+				return 1;
+			}
+			else
+			{
+				return -1;
+			}
+		}
+		else if (ack.type == SockPacket.TCP_PACK_TYPE_FIN)
+		{
+			if (ack.ack == pack.seq + pack.datalen || ack.ack == pack.seq + pack.datalen + 1)
+			{
+				return 0;
+			}
+			else if (ack.ack > pack.seq + pack.datalen + 1)
 			{
 				return 1;
 			}
@@ -625,6 +557,7 @@ public class Connection
 	
 	protected void contributeTo(ArrayList<SockPacket> arr, SockPacket p)
 	{
+//		System.out.println(p);
 		boolean exist = false;
 		for (SockPacket pp : arr)
 		{
@@ -644,9 +577,8 @@ public class Connection
 		}
 	}
 	
-	public void calc2()
+	protected void calc2()
 	{
-
 		long formerUp = 0, formerDown = 0;
 		for (int i = 0; i < packets.size(); i ++)
 		{
@@ -673,8 +605,8 @@ public class Connection
 			{
 				lastDataTime = p.time;
 			}
-			
-			
+
+
 			if (p.dir == SockPacket.PACKET_DIR_UP)
 			{
 				if (upSeqStart == -1)
@@ -682,8 +614,8 @@ public class Connection
 					upSeqStart = p.seq;
 				}
 				upDatalen += p.datalen;
-				p.seq = p.seq - upSeqStart;
-				
+				//p.seq = p.seq - upSeqStart;
+
 				if (p.seq - formerUp > SockPacket.MAX_PAYLOAD || p.seq < 0)
 				{
 //					System.out.println("up " + p.seq + ", " + formerUp);
@@ -704,9 +636,9 @@ public class Connection
 				{
 					downSeqStart = p.seq;
 				}
-				p.seq = p.seq - downSeqStart;
+				//p.seq = p.seq - downSeqStart;
 				downDatalen += p.datalen;
-				
+
 				if (p.seq - formerDown > SockPacket.MAX_PAYLOAD || p.seq < 0)
 				{
 //					System.out.println("down " + p.seq + ", " + formerDown);
@@ -727,7 +659,7 @@ public class Connection
 	
 	public void print(PrintStream out, String name, double start_t, PrintStream time6out, double first_t)
 	{
-//		System.out.println(synTime + " " + firstDataTime + " " + lastDataTime + " " + finTime + " " + rstTime);
+		//System.out.println(synTime + " " + firstDataTime + " " + lastDataTime + " " + finTime + " " + rstTime);
 		out.print(name + "," + Util.ipInt2Str(srcIP) + ":" + srcPort + "," 
 				+ Util.ipInt2Str(dstIP) + ":" + dstPort);
 		
@@ -736,12 +668,20 @@ public class Connection
 		boolean gap3 = (finTime != -1) && (lastDataTime != -1);
 		boolean gap4 = (rstTime != -1) && (finTime != -1);
 		boolean gap5 = (lastDataTime != -1) && (synTime != -1);
+		
+		boolean gap7 = (finTime != -1) && (lastUpSSLTime != -1);
+		boolean gap8 = (finTime != -1) && (lastDownSSLTime != -1);
+		
 		out.print("," + (synTime == -1 ? Float.NaN : Util.scaleTo2bit((synTime - start_t) / 1000))
 				+ "," + (!gap1 ? Float.NaN : Util.scaleTo2bit((firstDataTime - synTime) / 1000)) 
 				+ "," + (firstDataTime == -1 ? Float.NaN : Util.scaleTo2bit((firstDataTime - start_t) / 1000)) 
 				+ "," + (!gap2 ? Float.NaN : Util.scaleTo2bit((lastDataTime - firstDataTime) / 1000)) 
 				+ "," + (lastDataTime == -1 ? Float.NaN : Util.scaleTo2bit((lastDataTime - start_t) / 1000)) 
 				+ "," + (!gap3 ? Float.NaN : Util.scaleTo2bit((finTime - lastDataTime) / 1000)) 
+				+ "," + (lastUpSSLTime == -1 ? Float.NaN : Util.scaleTo2bit((lastUpSSLTime - start_t) / 1000)) 
+				+ "," + (!gap7 ? Float.NaN : Util.scaleTo2bit((finTime - lastUpSSLTime) / 1000)) 
+				+ "," + (lastDownSSLTime == -1 ? Float.NaN : Util.scaleTo2bit((lastDownSSLTime - start_t) / 1000)) 
+				+ "," + (!gap8 ? Float.NaN : Util.scaleTo2bit((finTime - lastDownSSLTime) / 1000)) 
 				+ "," + (finTime == -1 ? Float.NaN : Util.scaleTo2bit((finTime - start_t) / 1000)) 
 				+ "," + (!gap4 ? Float.NaN : Util.scaleTo2bit((rstTime - finTime) / 1000)) 
 				+ "," + (rstTime == -1 ? Float.NaN : Util.scaleTo2bit((rstTime - start_t) / 1000))
@@ -752,6 +692,8 @@ public class Connection
 				+ "," + (!gap1 ? Float.NaN : Util.scaleTo2bit((firstDataTime - synTime) / 1000)) 
 				+ "," + (!gap2 ? Float.NaN : Util.scaleTo2bit((lastDataTime - firstDataTime) / 1000)) 
 				+ "," + (!gap3 ? Float.NaN : Util.scaleTo2bit((finTime - lastDataTime) / 1000)) 
+				+ "," + (!gap7 ? Float.NaN : Util.scaleTo2bit((finTime - lastUpSSLTime) / 1000)) 
+				+ "," + (!gap8 ? Float.NaN : Util.scaleTo2bit((finTime - lastDownSSLTime) / 1000)) 
 				+ "," + (!gap4 ? Float.NaN : Util.scaleTo2bit((rstTime - finTime) / 1000)));
 		
 //		if (finTime - lastDataTime < 0)

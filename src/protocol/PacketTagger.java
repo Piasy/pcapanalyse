@@ -235,8 +235,6 @@ public class PacketTagger
 		for (Connection conn : ret.keySet())
 		{
 			conn.packets = ret.get(conn);
-//			conn.sortBySeq();
-//			conn.reTagBySSL();
 			conn.calc();
 		}
 		
