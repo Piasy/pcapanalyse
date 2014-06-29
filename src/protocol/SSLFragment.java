@@ -11,33 +11,17 @@ public class SSLFragment
 	}
 	
 	
-	double start = -1, end = -1;
-	public void calc()
-	{
-		for (SockPacket p : packets)
-		{
-			if (start == -1)
-			{
-				start = p.time;
-				end = p.time;
-			}
-			else
-			{
-//				if
-			}
-		}
-	}
+	public double start = -1, end = -1;
 	
 	@Override
 	public String toString()
 	{
-		String ret = "";
+		String ret = "Fragment: start = " + start + ", end = " + end + "\n";
 		
-
-//		for (SockPacket p : f.packets)
-//		{
-//			System.out.println("\t\t" + p);
-//		}
+		for (SockPacket p : packets)
+		{
+			ret += "\t\t" + p.toString() + "\n";
+		}
 		
 		return ret;
 	}

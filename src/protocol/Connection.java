@@ -74,29 +74,6 @@ public class Connection
 		}
 	}
 	
-	protected boolean overlaped(SockPacket pf, SockPacket pa)
-	{
-//		System.out.println(pf.seq + " " + pa.seq + " " + (pf.seq + pf.datalen));
-		return (pf.seq <= pa.seq) && (pa.seq < pf.seq + pf.datalen);
-	}
-	
-	protected int lastUniqueIndex(ArrayList<SockPacket> packets, int start)
-	{
-		for (int i = start - 1; i >= 0; i --)
-		{
-			if (!packets.get(i).dup)
-			{
-				return i;
-			}
-		}
-		
-		//this exit point shouldn't be reached
-		return start - 1;
-	}
-	
-	ArrayList<SSLFragment> upFragments = new ArrayList<SSLFragment>();
-	ArrayList<SSLFragment> downFragments = new ArrayList<SSLFragment>();
-
 	int xxxx = 1;
 	public void reTagBySSL()
 	{
@@ -142,41 +119,113 @@ public class Connection
 	
 	protected void reTagOneDir(ArrayList<SockPacket> packets, ArrayList<SSLFragment> fragments)
 	{
+	}
+
+	ArrayList<SockPacket> upPackets = new ArrayList<SockPacket>();
+	ArrayList<SockPacket> downPackets = new ArrayList<SockPacket>();
+	ArrayList<SockPacket> upPackStream = new ArrayList<SockPacket>();
+	ArrayList<SockPacket> downPackStream = new ArrayList<SockPacket>();
+	ArrayList<SSLFragment> upFragments = new ArrayList<SSLFragment>();
+	ArrayList<SSLFragment> downFragments = new ArrayList<SSLFragment>();
+	public void calc()
+	{
+		norm();
+		
+		ArrayList<SockPacket> downAcks = rebuildPackSeq(upPackets, downPackets, upPackStream);
+		ArrayList<SockPacket> upAcks = rebuildPackSeq(downPackets, upPackets, downPackStream);
+		
+		extractSSLFrag(upPackStream, upFragments);
+		extractSSLFrag(downPackStream, downFragments);
+		
+		calcFragTime(upFragments, downAcks);
+		calcFragTime(downFragments, upAcks);
+		
+//		for (SockPacket p : upPackStream)
+//		{
+//			System.out.println(p);
+//		}
+//		System.out.println("=========================================");
+		
+		for (SSLFragment f : upFragments)
+		{
+//			f.calc();
+			System.out.println(f);
+		}
+		System.out.println("==============================");
+	}
+
+	protected void calcFragTime(ArrayList<SSLFragment> fragments, ArrayList<SockPacket> acks)
+	{
+		for (SSLFragment f : fragments)
+		{
+			if (f.packets.size() == 1)
+			{
+				f.start = getAckTime(f.packets.get(0), acks);
+				f.end = f.start;
+			}
+			else
+			{
+				for (SockPacket p : f.packets)
+				{
+					double time = getAckTime(p, acks);
+					if (f.start == -1)
+					{
+						f.start = time;
+						f.end = time;
+					}
+					else
+					{
+						if (time < f.start)
+						{
+							f.start = time;
+						}
+						if (f.end < time)
+						{
+							f.end = time;
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	protected double getAckTime(SockPacket p, ArrayList<SockPacket> acks)
+	{
+		double time = p.time;
+		for (SockPacket ack : acks)
+		{
+			if (matched(ack, p) >= 0)
+			{
+				time = ack.time;
+				break;
+			}
+		}
+		
+		return time;
+	}
+	
+	/**
+	 * no dup packets
+	 * */
+	protected void extractSSLFrag(ArrayList<SockPacket> stream, ArrayList<SSLFragment> fragments)
+	{
 		int i = 1;
 		ByteBuffer bf = ByteBuffer.allocate(Setting.BUF_SIZE);
 		
-		if (packets.size() > 1)
+		if (stream.size() > 1)
 		{
 			bf.clear();
-			bf.put(packets.get(i).payload);
+			bf.put(stream.get(i).payload);
 			int index = 0;	//pointer to fragment start
 			int len = 0;
 			boolean littleLeft = false;
 			int left = 0;
-			while (i < packets.size())
+			ArrayList<SockPacket> fragstream = new ArrayList<SockPacket>();
+			while (i < stream.size())
 			{
-				int lastUniqueIndex = lastUniqueIndex(packets, i);
-				if (overlaped(packets.get(lastUniqueIndex), packets.get(i)))
-				{
-					packets.get(i).dup = true;
-					packets.get(i).type = packets.get(i - 1).type;
-//					System.out.println("dup! " + i);
-					
-					i ++;
-					if (i < packets.size())
-					{
-						bf.clear();
-						bf.put(packets.get(i).payload);
-						index = 0;
-						len = 0;
-					}
-					continue;
-				}
-				
-//				System.out.println(i + " : org = " + packets.get(i).type);
-				if ((packets.get(i).type == SockPacket.TCP_PACK_TYPE_DATA
-				  || packets.get(i).type == SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE)
-						&& !overlaped(packets.get(lastUniqueIndex), packets.get(i)))
+//				System.out.println(i + " : org = " + stream.get(i).type);
+				if ((stream.get(i).type == SockPacket.TCP_PACK_TYPE_DATA
+				  || stream.get(i).type == SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE))
 				{
 					int contentType = ((int) bf.get(index) + 256) % 256;
 //					System.out.println(i + " : cur = " + contentType + ", index = " + index);
@@ -184,12 +233,12 @@ public class Connection
 					 || contentType == PacketFilter.SSL_HANDSHAKE)
 					{
 //						System.out.println(i + " : HANDSHAKE");
-						packets.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE;
+						stream.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE;
 						i ++;
-						if (i < packets.size())
+						if (i < stream.size())
 						{
 							bf.clear();
-							bf.put(packets.get(i).payload);
+							bf.put(stream.get(i).payload);
 							index = 0;
 							len = 0;
 						}
@@ -197,7 +246,7 @@ public class Connection
 					else if (contentType == PacketFilter.SSL_CONTENT_APPDATA)
 					{
 //						System.out.println(i + " : DATA");
-						packets.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
+						stream.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
 						
 						if (littleLeft)
 						{
@@ -210,16 +259,16 @@ public class Connection
 						}
 						
 //						System.out.println("len = " + len + ", index = " + index);
-						ArrayList<SockPacket> fragPackets = new ArrayList<SockPacket>();
-						fragPackets.add(packets.get(i));
-						if (len == packets.get(i).payload.length)
+						fragstream.add(stream.get(i));
+						if (len == stream.get(i).payload.length)
 						{
-							fragments.add(new SSLFragment(fragPackets));
+							fragments.add(new SSLFragment(fragstream));
+							fragstream = new ArrayList<SockPacket>();
 							i ++;
-							if (i < packets.size())
+							if (i < stream.size())
 							{
 								bf.clear();
-								bf.put(packets.get(i).payload);
+								bf.put(stream.get(i).payload);
 								index = 0;
 								len = 0;
 							}
@@ -227,54 +276,45 @@ public class Connection
 						else
 						{
 							boolean restart = false;
-							while (i < packets.size() && len != packets.get(i).payload.length)
+							while (i < stream.size() && len != stream.get(i).payload.length)
 							{
-								if (packets.get(i).payload.length < len)
+								if (stream.get(i).payload.length < len)
 								{
-									len -= packets.get(i).payload.length;
+									len -= stream.get(i).payload.length;
 									
-									i ++;
-									while (i < packets.size() && overlaped(packets.get(lastUniqueIndex), packets.get(i)))
-									{//re-transmitted packets
-										fragPackets.add(packets.get(i));
-//										System.out.println(i + " : dup DATA");
-										packets.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
-										i ++;
-									}
-									
-									if (i < packets.size())
+									i ++;									
+									if (i < stream.size())
 									{
 //										System.out.println(i + " : continue");
 //										System.out.println(i + " : DATA");
-										packets.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
-										fragPackets.add(packets.get(i));
+										stream.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
+										fragstream.add(stream.get(i));
 									}
 								}
-								else if (packets.get(i).payload.length > len)
+								else if (stream.get(i).payload.length > len)
 								{
-									fragments.add(new SSLFragment(fragPackets));
+									fragments.add(new SSLFragment(fragstream));
+									fragstream = new ArrayList<SockPacket>();
 									
-									if (packets.get(i).payload.length >= len + 5)
+									if (stream.get(i).payload.length >= len + 5)
 									{
 //										System.out.println(i + " : restart");
 										bf.clear();
-										bf.put(packets.get(i).payload);
-										fragPackets = new ArrayList<SockPacket>();
-										fragPackets.add(packets.get(i));
+										bf.put(stream.get(i).payload);
+										//fragstream.add(stream.get(i));	//! it will be added at next iteration
 									}
 									else
 									{
 //										System.out.println(i + " : restart, but left little");
 										littleLeft = true;
-										left = packets.get(i).payload.length - len;
+										left = stream.get(i).payload.length - len;
 //										System.out.println("left = " + left);
 										bf.clear();	//!clear former payload
-										bf.put(packets.get(i).payload);	//!and re-put current payload
-										fragPackets = new ArrayList<SockPacket>();
-										fragPackets.add(packets.get(i));
+										bf.put(stream.get(i).payload);	//!and re-put current payload
+										fragstream.add(stream.get(i));
 										i ++;
-										bf.put(packets.get(i).payload);	//!and next payload
-										fragPackets.add(packets.get(i));
+										bf.put(stream.get(i).payload);	//!and next payload
+										//fragstream.add(stream.get(i));
 									}
 									index = len;
 									restart = true;
@@ -285,13 +325,13 @@ public class Connection
 							if (!restart)
 							{
 //								System.out.println(i + " : finish");
-								fragments.add(new SSLFragment(fragPackets));
+								fragments.add(new SSLFragment(fragstream));
 								i ++;
-								if (i < packets.size())
+								if (i < stream.size())
 								{
 //									System.out.println("before clear, type = " + (((int) bf.get(0) + 256) % 256));
 									bf.clear();
-									bf.put(packets.get(i).payload);
+									bf.put(stream.get(i).payload);
 //									int ttt = (((int) bf.get(0) + 256) % 256);
 //									System.out.println("after clear, type = " + ttt);
 									index = 0;
@@ -303,12 +343,12 @@ public class Connection
 					else
 					{
 //						System.out.println(i + " : UNKNOWN");
-						packets.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_UNKNOWN;
+						stream.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_UNKNOWN;
 						i ++;
-						if (i < packets.size())
+						if (i < stream.size())
 						{
 							bf.clear();
-							bf.put(packets.get(i).payload);
+							bf.put(stream.get(i).payload);
 							index = 0;
 							len = 0;
 						}
@@ -317,10 +357,10 @@ public class Connection
 				else
 				{
 					i ++;
-					if (i < packets.size())
+					if (i < stream.size())
 					{
 						bf.clear();
-						bf.put(packets.get(i).payload);
+						bf.put(stream.get(i).payload);
 						index = 0;
 						len = 0;
 					}
@@ -328,18 +368,21 @@ public class Connection
 			}
 		}
 	}
-
-	ArrayList<SockPacket> upPackets = new ArrayList<SockPacket>();
-	ArrayList<SockPacket> downPackets = new ArrayList<SockPacket>();
-	ArrayList<SockPacket> upPackStream = new ArrayList<SockPacket>();
-	ArrayList<SockPacket> downPackStream = new ArrayList<SockPacket>();
-	public void calc()
+		
+	protected int lastUniqueIndex(ArrayList<SockPacket> packets, int start)
 	{
-		norm();
-		rebuildPackSeq(upPackets, downPackets, upPackStream);
-		rebuildPackSeq(downPackets, upPackets, downPackStream);
+		for (int i = start - 1; i >= 0; i --)
+		{
+			if (!packets.get(i).dup)
+			{
+				return i;
+			}
+		}
+		
+		//this exit point shouldn't be reached
+		return start - 1;
 	}
-
+	
 	public long upSeqStart = -1, upAckStart = -1, downSeqStart = -1, downAckStart = -1;
 	protected void norm()
 	{
@@ -401,7 +444,7 @@ public class Connection
 	/**
 	 * data: up => down
 	 * */
-	protected void rebuildPackSeq(ArrayList<SockPacket> ups, ArrayList<SockPacket> downs, ArrayList<SockPacket> stream)
+	protected ArrayList<SockPacket> rebuildPackSeq(ArrayList<SockPacket> ups, ArrayList<SockPacket> downs, ArrayList<SockPacket> stream)
 	{
 		ArrayList<SockPacket> packs = new ArrayList<SockPacket>();
 		ArrayList<SockPacket> acks = new ArrayList<SockPacket>();
@@ -443,7 +486,6 @@ public class Connection
 //		}
 		
 		int ai = acks.size() - 1, pi = packs.size() - 1;
-		System.out.println("ai = " + ai + ", pi = " + pi);
 		ArrayList<SockPacket> tmp = new ArrayList<SockPacket>();
 		ArrayList<SockPacket> tmp2 = new ArrayList<SockPacket>();
 		long MAX_LEN = 65536;
@@ -458,12 +500,10 @@ public class Connection
 				break;
 			}
 			
-//			System.out.println("stride: " + ai + ", " + pi + ", " + matched(acks.get(ai), packs.get(pi)));
 			int hi = pi;
 			contributeTo(tmp, packs.get(hi));
 			//tmp.add(packs.get(hi));
 			pi --;
-			//while (pi >= 0 && continuous(packs.get(hi), packs.get(pi)))
 			int pos = pi;
 			while (pos >= 0 && packs.get(hi).seq - packs.get(pos).seq < MAX_LEN)
 			{
@@ -480,7 +520,6 @@ public class Connection
 			//pi: last continuous packet
 			if (pi > 0)
 			{
-//				ai --;
 				while (ai >= 0 && matched(acks.get(ai), packs.get(pi)) >= 0)
 				{
 					ai --;
@@ -491,7 +530,6 @@ public class Connection
 				}
 				//ai: the first ack after pi
 				
-//				hi = pi;
 				while (pi >= 0 && matched(acks.get(ai), packs.get(pi)) != 0)
 				{
 					pi --;
@@ -525,116 +563,29 @@ public class Connection
 				break;
 			}
 		}
-//		System.out.println("stride: " + ai + ", " + pi);
+
 		for (int j = tmp.size() - 1; j >= 0; j --)
 		{
 			stream.add(tmp.get(j));
 		}
 		
+//		for (int i = 1; i < stream.size(); i ++)
+//		{
+//			if (!continuous(stream.get(i), stream.get(i - 1)))
+//			{
+//				System.out.println("un-continuous!: ");
+//				System.out.println(stream.get(i - 1));
+//				System.out.println(stream.get(i) + "\n");
+//			}
+////			System.out.println(stream.get(i));
+//		}
+//		System.out.println("==============================");
 		
-		/*for (int i = packs.size() - 1; i >= 0; i --)
-		{
-			if (acks.size() != 0 && matched(acks.get(acks.size() - 1), packs.get(i)))
-			{
-				ArrayList<SockPacket> tmp = new ArrayList<SockPacket>();
-				int hi = i;
-				tmp.add(packs.get(hi));
-				for (int j = i - 1; j >= 0; j --)
-				{
-					if (continuous(packs.get(hi), packs.get(j)))
-					{
-						tmp.add(packs.get(j));
-						hi = j;
-					}
-				}
-				
-				for (int j = tmp.size() - 1; j >= 0; j --)
-				{
-					stream.add(tmp.get(j));
-				}
-				
-				break;
-			}
-		}*/
-		
-		/*int lastP = 0, curP = -1;
-		for (SockPacket ack : acks)
-		{
-			boolean found = false;
-			for (int i = curP + 1; i < packs.size(); i ++)
-			{
-				if (matched(ack, packs.get(i)))
-				{
-					lastP = curP;
-					curP = i;
-					found = true;
-					break;
-				}
-			}
-			
-			if (!found)
-			{
-				System.out.println("Error, ack doesn't match any packet!");
-				System.out.println(ack);
-			}
-			else
-			{
-				if (curP - lastP == 1)
-				{
-					stream.add(packs.get(curP));
-				}
-				else
-				{
-					ArrayList<SockPacket> tmp = new ArrayList<SockPacket>();
-					int hi = curP;
-					tmp.add(packs.get(hi));
-					for (int i = curP - 1; i > lastP; i --)
-					{
-						//! not only continuous with the packet behind,
-						//but also the last packet in stream
-						if (continuous(packs.get(hi), packs.get(i)))
-						{
-							tmp.add(packs.get(i));
-							hi = i;
-						}
-					}
-					
-					int index;
-					for (index = tmp.size() - 1; index >= 0; index --)
-					{
-						if (stream.size() == 0 
-						 || continuous(tmp.get(index), stream.get(stream.size() - 1)))
-						{
-							break;
-						}
-					}
-					for (int i = index; i >= 0; i --)
-					{
-						stream.add(tmp.get(index));
-					}
-				}
-			}
-		}*/
-		
-		for (int i = 1; i < stream.size(); i ++)
-		{
-			if (!continuous(stream.get(i), stream.get(i - 1)))
-			{
-				System.out.println("un-continuous!: ");
-				System.out.println(stream.get(i - 1));
-				System.out.println(stream.get(i) + "\n");
-			}
-//			System.out.println(stream.get(i));
-		}
-		System.out.println("==============================");
+		return acks;
 	}
 	
 	protected int matched(SockPacket ack, SockPacket pack)
 	{
-//		System.out.println("ack : " + ack);
-//		System.out.println("pack : " + pack);
-//		System.out.println(ack.ack + " " + (pack.seq + pack.datalen));
-		
 		if (pack.type == SockPacket.TCP_PACK_TYPE_SYN)
 		{
 			if (ack.ack == pack.seq + 1)
