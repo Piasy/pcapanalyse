@@ -360,7 +360,7 @@ public class Connection
 				}
 				p.ack -= (upAckStart - 1);
 				
-				if (p.seq - formerUp > SockPacket.MAX_PAYLOAD || p.seq < 0)
+				if (p.seq - formerUp > SockPacket.MAX_PAYLOAD || p.seq < 0)	//bad packet
 				{
 					p.seq = 0;
 					p.ackbit = false;
@@ -368,8 +368,8 @@ public class Connection
 				else
 				{
 					formerUp = p.seq;
+					upPackets.add(p);
 				}
-				upPackets.add(p);
 			}
 			else if (p.dir == SockPacket.PACKET_DIR_DOWN)
 			{
@@ -392,8 +392,8 @@ public class Connection
 				else
 				{
 					formerDown = p.seq;
+					downPackets.add(p);
 				}
-				downPackets.add(p);
 			}
 		}
 	}
@@ -419,22 +419,120 @@ public class Connection
 //			System.out.println(p);
 //		}
 		
+		ArrayList<SockPacket> tmpAcks = new ArrayList<SockPacket>();
 		for (SockPacket p : downs)
 		{
-			if (p.ackbit && (acks.size() == 0 
-						  || acks.get(acks.size() - 1).ack != p.ack))
+			if (p.ackbit)
+			{
+				tmpAcks.add(p);
+			}
+		}
+		Collections.sort(tmpAcks, new SockPacket.PackAckComparator());
+		
+		for (SockPacket p : tmpAcks)
+		{
+			if (acks.size() == 0 || acks.get(acks.size() - 1).ack != p.ack)
 			{
 				acks.add(p);
 			}
 		}
-		Collections.sort(acks, new SockPacket.PackAckComparator());
 
 //		for (SockPacket p : acks)
 //		{
 //			System.out.println(p);
 //		}
 		
-		for (int i = packs.size() - 1; i >= 0; i --)
+		int ai = acks.size() - 1, pi = packs.size() - 1;
+		System.out.println("ai = " + ai + ", pi = " + pi);
+		ArrayList<SockPacket> tmp = new ArrayList<SockPacket>();
+		ArrayList<SockPacket> tmp2 = new ArrayList<SockPacket>();
+		long MAX_LEN = 65536;
+		while (ai >= 0)
+		{
+			while (pi >= 0 && matched(acks.get(ai), packs.get(pi)) != 0)
+			{
+				pi --;
+			}
+			if (pi < 0)
+			{
+				break;
+			}
+			
+//			System.out.println("stride: " + ai + ", " + pi + ", " + matched(acks.get(ai), packs.get(pi)));
+			int hi = pi;
+			contributeTo(tmp, packs.get(hi));
+			//tmp.add(packs.get(hi));
+			pi --;
+			//while (pi >= 0 && continuous(packs.get(hi), packs.get(pi)))
+			int pos = pi;
+			while (pos >= 0 && packs.get(hi).seq - packs.get(pos).seq < MAX_LEN)
+			{
+				if (continuous(packs.get(hi), packs.get(pos)))
+				{
+					hi = pos;
+					contributeTo(tmp, packs.get(hi));
+					//tmp.add(packs.get(hi));
+				}
+				pos --;
+			}
+			pi = hi;
+			
+			//pi: last continuous packet
+			if (pi > 0)
+			{
+//				ai --;
+				while (ai >= 0 && matched(acks.get(ai), packs.get(pi)) >= 0)
+				{
+					ai --;
+				}
+				if (ai < 0)
+				{
+					break;
+				}
+				//ai: the first ack after pi
+				
+//				hi = pi;
+				while (pi >= 0 && matched(acks.get(ai), packs.get(pi)) != 0)
+				{
+					pi --;
+				}
+				if (pi < 0)
+				{
+					break;
+				}
+				
+				int lo = pi;
+				tmp2.clear();
+				//tmp2.add(packs.get(lo));	//! pi > 0, so pi will be added at next iteration
+				//for (int i = pi + 1; i <= hi; i ++)	//hi is the last continuous, so it has been added!
+				for (int i = pi + 1; i < hi; i ++)
+				{
+					if (continuous(packs.get(i), packs.get(lo)))
+					{
+						lo = i;
+						tmp2.add(packs.get(lo));
+					}
+				}
+				for (int i = tmp2.size() - 1; i >= 0; i --)
+				{
+					//contributeTo(tmp, packs.get(i));	//!stupid!
+					contributeTo(tmp, tmp2.get(i));
+					//tmp.add(tmp2.get(i));
+				}
+			}
+			else
+			{
+				break;
+			}
+		}
+//		System.out.println("stride: " + ai + ", " + pi);
+		for (int j = tmp.size() - 1; j >= 0; j --)
+		{
+			stream.add(tmp.get(j));
+		}
+		
+		
+		/*for (int i = packs.size() - 1; i >= 0; i --)
 		{
 			if (acks.size() != 0 && matched(acks.get(acks.size() - 1), packs.get(i)))
 			{
@@ -457,7 +555,7 @@ public class Connection
 				
 				break;
 			}
-		}
+		}*/
 		
 		/*int lastP = 0, curP = -1;
 		for (SockPacket ack : acks)
@@ -518,13 +616,20 @@ public class Connection
 			}
 		}*/
 		
-		for (SockPacket p : stream)
+		for (int i = 1; i < stream.size(); i ++)
 		{
-			System.out.println(p);
+			if (!continuous(stream.get(i), stream.get(i - 1)))
+			{
+				System.out.println("un-continuous!: ");
+				System.out.println(stream.get(i - 1));
+				System.out.println(stream.get(i) + "\n");
+			}
+//			System.out.println(stream.get(i));
 		}
+		System.out.println("==============================");
 	}
 	
-	protected boolean matched(SockPacket ack, SockPacket pack)
+	protected int matched(SockPacket ack, SockPacket pack)
 	{
 //		System.out.println("ack : " + ack);
 //		System.out.println("pack : " + pack);
@@ -532,17 +637,60 @@ public class Connection
 		
 		if (pack.type == SockPacket.TCP_PACK_TYPE_SYN)
 		{
-			return ack.ack == pack.seq + 1;
+			if (ack.ack == pack.seq + 1)
+			{
+				return 0;
+			}
+			else if (ack.ack > pack.seq + 1)
+			{
+				return 1;
+			}
+			else
+			{
+				return -1;
+			}
 		}
 		else
 		{
-			return ack.ack == pack.seq + pack.datalen;
+			if (ack.ack == pack.seq + pack.datalen)
+			{
+				return 0;
+			}
+			else if (ack.ack > pack.seq + pack.datalen)
+			{
+				return 1;
+			}
+			else
+			{
+				return -1;
+			}
 		}
 	}
 	
 	protected boolean continuous(SockPacket pa, SockPacket pf)
 	{
 		return pa.seq == pf.seq + pf.datalen;
+	}
+	
+	protected void contributeTo(ArrayList<SockPacket> arr, SockPacket p)
+	{
+		boolean exist = false;
+		for (SockPacket pp : arr)
+		{
+			if (pp.time == p.time)
+			{
+				exist = true;
+				break;
+			}
+		}
+		if (!exist)
+		{
+			arr.add(p);
+		}
+		else
+		{
+			System.out.println("exist!: " + p);
+		}
 	}
 	
 	public void calc2()

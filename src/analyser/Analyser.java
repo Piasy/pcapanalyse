@@ -97,10 +97,10 @@ public class Analyser
 //				if (Util.ipInt2Str(conn.dstIP).equals("108.160.166.10") && conn.srcPort == 52214)
 //				{//53074--54.221.244.208
 ////					out.println(conn.packets.size());
-					for (SockPacket p : conn.packets)
-					{
-						System.out.println(p);
-					}
+//					for (SockPacket p : conn.packets)
+//					{
+//						System.out.println(p);
+//					}
 //				}
 				
 				totalUpSize += conn.upSeqEnd;
