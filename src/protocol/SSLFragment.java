@@ -1,13 +1,12 @@
 package protocol;
 
-import java.util.ArrayList;
-
 public class SSLFragment
 {
-	ArrayList<SockPacket> packets;
-	public SSLFragment(ArrayList<SockPacket> ps)
+	long seqStart, seqEnd;
+	public SSLFragment(long seqs, long seqe)
 	{
-		packets = ps;
+		seqStart = seqs;
+		seqEnd = seqe;
 	}
 	
 	
@@ -16,13 +15,8 @@ public class SSLFragment
 	@Override
 	public String toString()
 	{
-		String ret = "Fragment: start = " + start + ", end = " + end + "\n";
-		
-		for (SockPacket p : packets)
-		{
-			ret += "\t\t" + p.toString() + "\n";
-		}
-		
+		String ret = "Fragment: start = " + start + ", end = " + end
+				+ ", seqs = " + seqStart + ", seqe = " + seqEnd;
 		return ret;
 	}
 }

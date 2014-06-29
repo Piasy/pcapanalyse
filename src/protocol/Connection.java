@@ -8,7 +8,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 
-import setting.Setting;
 import util.Util;
 
 public class Connection
@@ -44,95 +43,131 @@ public class Connection
 	public void calc()
 	{
 		norm();
-		
-//		System.out.println("Connection.calc()");
-		
 		calc2();
 		
 		if (srcPort == 443 || dstPort == 443)
 		{
-//			System.out.println("443");
 			ArrayList<SockPacket> downAcks = rebuildPackSeq(upPackets, downPackets, upPackStream);
 			ArrayList<SockPacket> upAcks = rebuildPackSeq(downPackets, upPackets, downPackStream);
-
-//			System.out.println(upPackStream.size() + " " + downPackStream.size());
-			
-			extractSSLFrag(upPackStream, upFragments);
-			extractSSLFrag(downPackStream, downFragments);
-			
-			System.out.println(upFragments.size() + " " + downFragments.size());
-			
-			calcFragTime(upFragments, downAcks);
-			calcFragTime(downFragments, upAcks);
-			
-
-//			if (Util.ipInt2Str(this.dstIP).equals("107.21.228.70"))
-//			{
-//				for (SSLFragment f : upFragments)
-//				{
-//					System.out.println(f);
-//				}
-//				System.out.println("-------------------------");
-//				for (SSLFragment f : downFragments)
-//				{
-//					System.out.println(f);
-//				}
-//				System.out.println("=========================");
-//			}
-			
-			if (upFragments.size() > 0)
+	
+			if (upPackStream.size() > 0)
 			{
-				lastUpSSLTime = upFragments.get(upFragments.size() - 1).end;
+				ByteBuffer upPayload = extractPayload(upPackStream);
+				SockPacket p = upPackStream.get(upPackStream.size() - 1);
+				int len = (int) (p.seq + p.datalen);
+				extractSSLFrag(upPayload, len, upFragments);
+				calcFragTime(upFragments, downAcks);
+				if (upFragments.size() > 0)
+				{
+					lastUpSSLTime = upFragments.get(upFragments.size() - 1).end;
+				}
+				
+				for (int i = 0; i < len; i ++)
+				{
+					System.out.print(upPayload.get(i) + " ");
+					if (i > 700)
+					{
+						break;
+					}
+				}
+				System.out.println();
+				
+				for (SSLFragment f : upFragments)
+				{
+					System.out.println(f);
+				}
+				System.out.println("=========================");
 			}
 			
-			if (downFragments.size() > 0)
+			if (downPackStream.size() > 0)
 			{
-				lastDownSSLTime = downFragments.get(downFragments.size() - 1).end;
+				ByteBuffer downPayload = extractPayload(downPackStream);
+				SockPacket p = downPackStream.get(downPackStream.size() - 1);
+				int len = (int) (p.seq + p.datalen);
+				extractSSLFrag(downPayload, len, downFragments);
+				calcFragTime(downFragments, upAcks);
+				if (downFragments.size() > 0)
+				{
+					lastDownSSLTime = downFragments.get(downFragments.size() - 1).end;
+				}
 			}
 		}
+	}
+	
+	protected void extractSSLFrag(ByteBuffer payload, int len, ArrayList<SSLFragment> fragments)
+	{
+		int pos = 0;
+		while (pos + 5 < len)
+		{
+			int contType = ((int) payload.get(pos) + 256) % 256;
+			int version = ((int) payload.getShort(pos + 1) + 65536) % 65536;
+			int datalen = ((int) payload.getShort(pos + 3) + 65536) % 65536;
+			if (version == PacketFilter.SSL_VERSION)
+			{
+				if (contType == PacketFilter.SSL_CONTENT_APPDATA)
+				{
+					fragments.add(new SSLFragment(pos + 1, pos + datalen + 6));
+				}
+				pos += (datalen + 5);
+			}
+			else
+			{
+				System.out.println("Broken payload!");
+				break;
+			}
+		}
+	}
+	
+	protected ByteBuffer extractPayload(ArrayList<SockPacket> stream)
+	{
+		SockPacket p = stream.get(stream.size() - 1);
+		ByteBuffer bf = ByteBuffer.allocate((int) (p.seq + p.datalen));
+		
+		int pos = 0;
+		while (pos < stream.size() && stream.get(pos).seq != 1)
+		{
+			pos ++;
+		}
+		
+		if (pos < stream.size())
+		{
+			bf.put(stream.get(pos).payload);
+			pos ++;
+			
+			while (pos < stream.size())
+			{
+				if (stream.get(pos).datalen > 0)
+				{
+					SockPacket pf = stream.get(pos - 1);
+					SockPacket pa = stream.get(pos);
+					int offset = (int) (pf.seq + pf.datalen - pa.seq);
+					if (offset > 0)
+					{
+						bf.put(pa.payload, offset, pa.payload.length - offset);
+					}
+				}
+				
+				pos ++;
+			}
+		}
+		
+		return bf;
 	}
 	
 	protected void calcFragTime(ArrayList<SSLFragment> fragments, ArrayList<SockPacket> acks)
 	{
 		for (SSLFragment f : fragments)
 		{
-			if (f.packets.size() == 1)
-			{
-				f.start = getAckTime(f.packets.get(0), acks);
-				f.end = f.start;
-			}
-			else
-			{
-				for (SockPacket p : f.packets)
-				{
-					double time = getAckTime(p, acks);
-					if (f.start == -1)
-					{
-						f.start = time;
-						f.end = time;
-					}
-					else
-					{
-						if (time < f.start)
-						{
-							f.start = time;
-						}
-						if (f.end < time)
-						{
-							f.end = time;
-						}
-					}
-				}
-			}
+			f.end = getAckTime(f.seqEnd, acks);
 		}
 	}
 	
-	protected double getAckTime(SockPacket p, ArrayList<SockPacket> acks)
+	protected double getAckTime(long seq, ArrayList<SockPacket> acks)
 	{
-		double time = p.time;
+		double time = -1;
 		for (SockPacket ack : acks)
 		{
-			if (matched(ack, p) >= 0)
+			if (matched(ack, seq) >= 0)
 			{
 				time = ack.time;
 				break;
@@ -142,156 +177,6 @@ public class Connection
 		return time;
 	}
 	
-	/**
-	 * no dup packets
-	 * */
-	protected void extractSSLFrag(ArrayList<SockPacket> stream, ArrayList<SSLFragment> fragments)
-	{
-		int i = 1;
-		ByteBuffer bf = ByteBuffer.allocate(Setting.BUF_SIZE);
-		
-		if (stream.size() > 1)
-		{
-			bf.clear();
-			bf.put(stream.get(i).payload);
-			int index = 0;	//pointer to fragment start
-			int len = 0;
-			boolean littleLeft = false;
-			int left = 0;
-			ArrayList<SockPacket> fragstream = new ArrayList<SockPacket>();
-			while (i < stream.size())
-			{
-				if ((stream.get(i).type == SockPacket.TCP_PACK_TYPE_DATA
-				  || stream.get(i).type == SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE))
-				{
-					int contentType = ((int) bf.get(index) + 256) % 256;
-					if (contentType == PacketFilter.SSL_CIPHER_SPEC 
-					 || contentType == PacketFilter.SSL_HANDSHAKE)
-					{
-						stream.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_HANDSHAKE;
-						i ++;
-						if (i < stream.size())
-						{
-							bf.clear();
-							bf.put(stream.get(i).payload);
-							index = 0;
-							len = 0;
-						}
-					}
-					else if (contentType == PacketFilter.SSL_CONTENT_APPDATA)
-					{
-						stream.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
-						
-						if (littleLeft)
-						{
-							littleLeft = false;
-							len = ((int) bf.getShort(index + 3) + 65536) % 65536 + 5 - left;
-						}
-						else
-						{
-							len += ((int) bf.getShort(index + 3) + 65536) % 65536 + 5;	//including ssl header
-						}
-						
-						fragstream.add(stream.get(i));
-						if (len == stream.get(i).payload.length)
-						{
-							fragments.add(new SSLFragment(fragstream));
-							fragstream = new ArrayList<SockPacket>();
-							i ++;
-							if (i < stream.size())
-							{
-								bf.clear();
-								bf.put(stream.get(i).payload);
-								index = 0;
-								len = 0;
-							}
-						}
-						else
-						{
-							boolean restart = false;
-							while (i < stream.size() && len != stream.get(i).payload.length)
-							{
-								if (stream.get(i).payload.length < len)
-								{
-									len -= stream.get(i).payload.length;
-									
-									i ++;									
-									if (i < stream.size())
-									{
-										stream.get(i).type = SockPacket.TCP_PACK_TYPE_DATA;
-										fragstream.add(stream.get(i));
-									}
-								}
-								else if (stream.get(i).payload.length > len)
-								{
-									fragments.add(new SSLFragment(fragstream));
-									fragstream = new ArrayList<SockPacket>();
-									
-									if (stream.get(i).payload.length >= len + 5)
-									{
-										bf.clear();
-										bf.put(stream.get(i).payload);
-										//fragstream.add(stream.get(i));	//! it will be added at next iteration
-									}
-									else
-									{
-										littleLeft = true;
-										left = stream.get(i).payload.length - len;
-										bf.clear();	//!clear former payload
-										bf.put(stream.get(i).payload);	//!and re-put current payload
-										fragstream.add(stream.get(i));
-										i ++;
-										bf.put(stream.get(i).payload);	//!and next payload
-										//fragstream.add(stream.get(i));
-									}
-									index = len;
-									restart = true;
-									break;
-								}
-							}
-							
-							if (!restart)
-							{
-								fragments.add(new SSLFragment(fragstream));
-								i ++;
-								if (i < stream.size())
-								{
-									bf.clear();
-									bf.put(stream.get(i).payload);
-									index = 0;
-									len = 0;
-								}
-							}
-						}
-					}
-					else
-					{
-						stream.get(i).type = SockPacket.TCP_PACK_TYPE_SSL_UNKNOWN;
-						i ++;
-						if (i < stream.size())
-						{
-							bf.clear();
-							bf.put(stream.get(i).payload);
-							index = 0;
-							len = 0;
-						}
-					}
-				}
-				else
-				{
-					i ++;
-					if (i < stream.size())
-					{
-						bf.clear();
-						bf.put(stream.get(i).payload);
-						index = 0;
-						len = 0;
-					}
-				}
-			}
-		}
-	}
-		
 	protected int lastUniqueIndex(ArrayList<SockPacket> packets, int start)
 	{
 		for (int i = start - 1; i >= 0; i --)
@@ -547,6 +432,22 @@ public class Connection
 			{
 				return -1;
 			}
+		}
+	}
+	
+	protected int matched(SockPacket ack, long seqe)
+	{
+		if (ack.ack == seqe)
+		{
+			return 0;
+		}
+		else if (ack.ack > seqe)
+		{
+			return 1;
+		}
+		else
+		{
+			return -1;
 		}
 	}
 	

@@ -38,7 +38,8 @@ public class PacketFilter
 	
 	public static final int SSL_HANDSHAKE = 22;
 	public static final int SSL_CIPHER_SPEC = 20;
-	public static final int SSL_CONTENT_APPDATA = 23;
+	public static final int SSL_CONTENT_APPDATA = 0x17;
+	public static final int SSL_VERSION = 0x0301;
 	
 	public static final int TCP_HEAD_START_INDEX = 34;
 	
