@@ -36,55 +36,47 @@ public class Connection
 	
 	ArrayList<SockPacket> upPackets = new ArrayList<SockPacket>();
 	ArrayList<SockPacket> downPackets = new ArrayList<SockPacket>();
-	ArrayList<SockPacket> upPackStream = new ArrayList<SockPacket>();
-	ArrayList<SockPacket> downPackStream = new ArrayList<SockPacket>();
 	ArrayList<SSLFragment> upFragments = new ArrayList<SSLFragment>();
 	ArrayList<SSLFragment> downFragments = new ArrayList<SSLFragment>();
 	public void calc()
 	{
 		norm();
 		calc2();
-		
+				
 		if (srcPort == 443 || dstPort == 443)
-		{
-			ArrayList<SockPacket> downAcks = rebuildPackSeq(upPackets, downPackets, upPackStream);
-			ArrayList<SockPacket> upAcks = rebuildPackSeq(downPackets, upPackets, downPackStream);
-	
-			if (upPackStream.size() > 0)
+		{			
+			ArrayList<SockPacket> downAcks = extractAcks(upPackets);
+			ArrayList<SockPacket> upAcks = extractAcks(downPackets);
+
+			Collections.sort(upPackets, new SockPacket.PackSeqComparator());
+			Collections.sort(downPackets, new SockPacket.PackSeqComparator());
+			
+			if (upPackets.size() > 0)
 			{
-				ByteBuffer upPayload = extractPayload(upPackStream);
-				SockPacket p = upPackStream.get(upPackStream.size() - 1);
-				int len = (int) (p.seq + p.datalen);
-				extractSSLFrag(upPayload, len, upFragments);
+				SockPacket pu = upPackets.get(upPackets.size() - 1);
+				ByteBuffer upPayload = ByteBuffer.allocate((int) (pu.seq + pu.datalen));
+				int uplen = extractPayload(upPackets, upPayload);
+				extractSSLFrag(upPayload, uplen, upFragments);
 				calcFragTime(upFragments, downAcks);
 				if (upFragments.size() > 0)
 				{
 					lastUpSSLTime = upFragments.get(upFragments.size() - 1).end;
 				}
 				
-				for (int i = 0; i < len; i ++)
+				System.out.println("uplen = " + uplen);
+				for (int i = 0; i < uplen; i ++)
 				{
-					System.out.print(upPayload.get(i) + " ");
-					if (i > 700)
-					{
-						break;
-					}
+					System.out.println(upPayload.get(i) + " ");
 				}
-				System.out.println();
-				
-				for (SSLFragment f : upFragments)
-				{
-					System.out.println(f);
-				}
-				System.out.println("=========================");
+				System.out.println("============================");
 			}
 			
-			if (downPackStream.size() > 0)
+			if (downPackets.size() > 0)
 			{
-				ByteBuffer downPayload = extractPayload(downPackStream);
-				SockPacket p = downPackStream.get(downPackStream.size() - 1);
-				int len = (int) (p.seq + p.datalen);
-				extractSSLFrag(downPayload, len, downFragments);
+				SockPacket pd = downPackets.get(downPackets.size() - 1);
+				ByteBuffer downPayload = ByteBuffer.allocate((int) (pd.seq + pd.datalen));
+				int downlen = extractPayload(downPackets, downPayload);
+				extractSSLFrag(downPayload, downlen, downFragments);
 				calcFragTime(downFragments, upAcks);
 				if (downFragments.size() > 0)
 				{
@@ -92,6 +84,85 @@ public class Connection
 				}
 			}
 		}
+	}
+	
+	protected ArrayList<SockPacket> extractAcks(ArrayList<SockPacket> packs)
+	{
+		ArrayList<SockPacket> acks = new ArrayList<SockPacket>();
+		ArrayList<SockPacket> tmpAcks = new ArrayList<SockPacket>();
+		for (SockPacket p : packs)
+		{
+			if (p.ackbit)
+			{
+				tmpAcks.add(p);
+			}
+		}
+		Collections.sort(tmpAcks, new SockPacket.PackAckComparator());
+		for (SockPacket p : tmpAcks)
+		{
+			if (acks.size() == 0 || acks.get(acks.size() - 1).ack != p.ack)
+			{
+				acks.add(p);
+			}
+		}
+		return acks;
+	}
+	
+	protected int extractPayload(ArrayList<SockPacket> stream, ByteBuffer bf)
+	{		
+		int index = 0;
+		while (index < stream.size())
+		{
+			if (stream.get(index).seq == 1 
+				&& stream.get(index).datalen > 0)
+			{
+				break;
+			}
+			index ++;
+		}
+		
+		int pos = 1;
+		if (index < stream.size())
+		{
+			bf.put(stream.get(index).payload);
+			pos += stream.get(index).payload.length;
+			index ++;
+			
+			while (index < stream.size())
+			{
+				if (stream.get(index).datalen > 0)
+				{
+					int offset = (int) (pos - stream.get(index).seq);
+					int len = stream.get(index).datalen;
+					if (0 <= offset && offset < len)
+					{
+						bf.put(stream.get(index).payload, offset, len - offset);
+						pos += (len - offset);
+					}
+					else if (len <= offset)
+					{
+						//do nothing
+					}
+					else
+					{
+						System.out.println("Broken seq!");
+//						for (int i = index - 3; i <= index + 3; i ++)
+//						{
+//							if (0 <= i && i < stream.size())
+//							{
+//								System.out
+//										.println(stream.get(i));
+//							}
+//						}
+//						System.out.println("=====================================");
+						break;
+					}
+				}
+				index ++;
+			}
+		}
+		
+		return pos;
 	}
 	
 	protected void extractSSLFrag(ByteBuffer payload, int len, ArrayList<SSLFragment> fragments)
@@ -118,41 +189,7 @@ public class Connection
 		}
 	}
 	
-	protected ByteBuffer extractPayload(ArrayList<SockPacket> stream)
-	{
-		SockPacket p = stream.get(stream.size() - 1);
-		ByteBuffer bf = ByteBuffer.allocate((int) (p.seq + p.datalen));
-		
-		int pos = 0;
-		while (pos < stream.size() && stream.get(pos).seq != 1)
-		{
-			pos ++;
-		}
-		
-		if (pos < stream.size())
-		{
-			bf.put(stream.get(pos).payload);
-			pos ++;
-			
-			while (pos < stream.size())
-			{
-				if (stream.get(pos).datalen > 0)
-				{
-					SockPacket pf = stream.get(pos - 1);
-					SockPacket pa = stream.get(pos);
-					int offset = (int) (pf.seq + pf.datalen - pa.seq);
-					if (offset > 0)
-					{
-						bf.put(pa.payload, offset, pa.payload.length - offset);
-					}
-				}
-				
-				pos ++;
-			}
-		}
-		
-		return bf;
-	}
+
 	
 	protected void calcFragTime(ArrayList<SSLFragment> fragments, ArrayList<SockPacket> acks)
 	{
