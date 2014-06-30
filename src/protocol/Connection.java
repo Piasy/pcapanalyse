@@ -141,7 +141,8 @@ public class Connection
 		Collections.sort(tmpAcks, new SockPacket.PackAckComparator());
 		for (SockPacket p : tmpAcks)
 		{
-			if (acks.size() == 0 || acks.get(acks.size() - 1).ack != p.ack)
+			if ((acks.size() == 0 || acks.get(acks.size() - 1).ack != p.ack) 
+					&& (finTime == -1 || p.time < finTime))
 			{
 				acks.add(p);
 			}
