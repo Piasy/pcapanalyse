@@ -45,12 +45,19 @@ public class Connection
 				
 		if (srcPort == 443 || dstPort == 443)
 		{			
-			ArrayList<SockPacket> downAcks = extractAcks(upPackets);
-			ArrayList<SockPacket> upAcks = extractAcks(downPackets);
+			ArrayList<SockPacket> downAcks = extractAcks(upPackets);	//ack for down stream, in up stream
+			ArrayList<SockPacket> upAcks = extractAcks(downPackets);	//ack for up stream, in down stream
+//			System.out.println("acks : " + upAcks.size() + ", " + downAcks.size());
+//			for (SockPacket pp : downAcks)
+//			{
+//				System.out.println(pp);
+//			}
+//			System.out.println("---------------------------------");
 
 			Collections.sort(upPackets, new SockPacket.PackSeqComparator());
 			Collections.sort(downPackets, new SockPacket.PackSeqComparator());
-			
+
+//			System.out.println(this);
 			if (upPackets.size() > 0)
 			{
 				SockPacket pu = upPackets.get(upPackets.size() - 1);
@@ -59,7 +66,7 @@ public class Connection
 					ByteBuffer upPayload = ByteBuffer.allocate((int) (pu.seq + pu.datalen));
 					int uplen = extractPayload(upPackets, upPayload);
 					extractSSLFrag(upPayload, uplen, upFragments);
-					calcFragTime(upFragments, downAcks);
+					calcFragTime(upFragments, upAcks);
 					if (upFragments.size() > 0)
 					{
 						//lastUpSSLTime = upFragments.get(upFragments.size() - 1).end;
@@ -67,6 +74,7 @@ public class Connection
 						{
 							if (upFragments.get(i).end != -1)
 							{
+//								System.out.println(upFragments.get(i));
 								lastUpSSLTime = upFragments.get(i).end;
 								break;
 							}
@@ -94,26 +102,29 @@ public class Connection
 					ByteBuffer downPayload = ByteBuffer.allocate((int) (pd.seq + pd.datalen));
 					int downlen = extractPayload(downPackets, downPayload);
 					extractSSLFrag(downPayload, downlen, downFragments);
-					calcFragTime(downFragments, upAcks);
+					calcFragTime(downFragments, downAcks);
 					if (downFragments.size() > 0)
 					{
 						//lastDownSSLTime = downFragments.get(downFragments.size() - 1).end;
 						for (int i = downFragments.size() - 1; i >= 0; i --)
 						{
+//							System.out.println(downFragments.get(i));
 							if (downFragments.get(i).end != -1)
 							{
+//								System.out.println(downFragments.get(i));
 								lastDownSSLTime = downFragments.get(i).end;
 								break;
 							}
 						}
 					}
+//					System.out.println("downlen = " + downlen + ", " + upPackets.size() + ", " + (pd.seq + pd.datalen));
 				}
 			}
 		}
 		
-//		System.out.println(this);
 //		System.out.println(upFragments.size() + " " + downFragments.size());
-//		System.out.println(lastUpSSLTime + " " + lastDownSSLTime);
+//		System.out.println(lastUpSSLTime + " " + lastDownSSLTime + " " + finTime);
+//		System.out.println("========================================");
 	}
 	
 	protected ArrayList<SockPacket> extractAcks(ArrayList<SockPacket> packs)
@@ -504,6 +515,7 @@ public class Connection
 	
 	protected int matched(SockPacket ack, long seqe)
 	{
+//		System.out.println("match : " + seqe + " => " + ack);
 		if (ack.ack == seqe)
 		{
 			return 0;
