@@ -113,96 +113,113 @@ public class Analyser
 			PrintStream time6out = new PrintStream(new File("data.csv"));
 			//time6out.println("synTime - baseTime,firstDataTime - synTime,lastDataTime - firstDataTime,"
 			//		+ "finTime - lastDataTime,rstTime - finTime");
-			for (String name : dnsTaggedConns.keySet())
-			{
-				for (Connection conn : dnsTaggedConns.get(name))
-				{
-					conn.print(out, name, first_t, time6out, first_t);
-					conn.write(name, first_t);
-				}
-			}
 			
-			//step 4: extract ssl fragment, done by step 2, conn.calc()
-			
-			//step 5: output total data goodput
-			PrintStream totalGoodputout = new PrintStream(new File("totalGoodput.csv"));
-			double dataStreamSyn = -1, dataStreamLastData = -1;
-			long totalSize = 0;
-			for (Connection conn : dnsTaggedConns.get("dl-clientX.dropbox.com"))
+			if (belongsToDropbox(dnsTaggedConns))
 			{
-				if (dataStreamSyn == -1)
+				System.out.println("dropbox");
+				
+				for (String name : dnsTaggedConns.keySet())
 				{
-					dataStreamSyn = conn.synTime;
-				}
-				else if (conn.synTime != -1 && conn.synTime < dataStreamSyn)
-				{
-					dataStreamSyn = conn.synTime;
+					for (Connection conn : dnsTaggedConns.get(name))
+					{
+						conn.print(out, name, first_t, time6out, first_t);
+						conn.write(name, first_t);
+					}
 				}
 				
-				if (dataStreamLastData == -1)
-				{
-					dataStreamLastData = conn.lastDataTime;
-				}
-				else if (conn.lastDataTime != -1 && dataStreamLastData < conn.lastDataTime)
-				{
-					dataStreamLastData = conn.lastDataTime;
-				}
-				totalSize += conn.downSeqEnd + conn.upSeqEnd;
-			}
-			for (Connection conn : dnsTaggedConns.get("api-content.dropbox.com"))
-			{
-				if (dataStreamSyn == -1)
-				{
-					dataStreamSyn = conn.synTime;
-				}
-				else if (conn.synTime != -1 && conn.synTime < dataStreamSyn)
-				{
-					dataStreamSyn = conn.synTime;
-				}
+				//step 4: extract ssl fragment, done by step 2, conn.calc()
 				
-				if (dataStreamLastData == -1)
+				//step 5: output total data goodput
+				PrintStream totalGoodputout = new PrintStream(new File("totalGoodput.csv"));
+				double dataStreamSyn = -1, dataStreamLastData = -1;
+				long totalSize = 0;
+				for (Connection conn : dnsTaggedConns.get("dl-clientX.dropbox.com"))
 				{
-					dataStreamLastData = conn.lastDataTime;
+					if (dataStreamSyn == -1)
+					{
+						dataStreamSyn = conn.synTime;
+					}
+					else if (conn.synTime != -1 && conn.synTime < dataStreamSyn)
+					{
+						dataStreamSyn = conn.synTime;
+					}
+					
+					if (dataStreamLastData == -1)
+					{
+						dataStreamLastData = conn.lastDataTime;
+					}
+					else if (conn.lastDataTime != -1 && dataStreamLastData < conn.lastDataTime)
+					{
+						dataStreamLastData = conn.lastDataTime;
+					}
+					totalSize += conn.downSeqEnd + conn.upSeqEnd;
 				}
-				else if (conn.lastDataTime != -1 && dataStreamLastData < conn.lastDataTime)
+				for (Connection conn : dnsTaggedConns.get("api-content.dropbox.com"))
 				{
-					dataStreamLastData = conn.lastDataTime;
-				}
+					if (dataStreamSyn == -1)
+					{
+						dataStreamSyn = conn.synTime;
+					}
+					else if (conn.synTime != -1 && conn.synTime < dataStreamSyn)
+					{
+						dataStreamSyn = conn.synTime;
+					}
+					
+					if (dataStreamLastData == -1)
+					{
+						dataStreamLastData = conn.lastDataTime;
+					}
+					else if (conn.lastDataTime != -1 && dataStreamLastData < conn.lastDataTime)
+					{
+						dataStreamLastData = conn.lastDataTime;
+					}
 
-				totalSize += conn.downSeqEnd + conn.upSeqEnd;
-			}
-			if (dataStreamLastData != -1 && dataStreamSyn != -1)
-			{
-				totalGoodputout.println(Util.scaleTo2bit((double) totalSize / (dataStreamLastData - dataStreamSyn)));
+					totalSize += conn.downSeqEnd + conn.upSeqEnd;
+				}
+				if (dataStreamLastData != -1 && dataStreamSyn != -1)
+				{
+					totalGoodputout.println(Util.scaleTo2bit((double) totalSize / (dataStreamLastData - dataStreamSyn)));
+				}
+				else
+				{
+					totalGoodputout.println(Float.NaN);
+				}
+				totalGoodputout.close();
+				
+				//step 6: tag packets by dns
+				HashMap<String, ArrayList<SockPacket>> merged = tagger.mergeDNSTag(packets, records);
+				for (String key : merged.keySet())
+				{
+					ArrayList<SockPacket> ps = merged.get(key);
+					
+					PrintWriter pw1 = new PrintWriter(new File("dns-time/dns_" + key + "_conn_down"));
+					PrintWriter pw12 = new PrintWriter(new File("dns-time/dns_" + key + "_conn_up"));
+					for (SockPacket p : ps)
+					{
+						if (p.dir == SockPacket.PACKET_DIR_DOWN)
+						{
+							pw1.println((long) p.time + "\t" + p.seq);
+						}
+						else if (p.dir == SockPacket.PACKET_DIR_UP)
+						{
+							pw12.println((long) p.time + "\t" + p.seq);
+						}
+					}
+					pw1.close();
+					pw12.close();
+				}
 			}
 			else
 			{
-				totalGoodputout.println(Float.NaN);
-			}
-			totalGoodputout.close();
-			
-			//step 6: tag packets by dns
-			HashMap<String, ArrayList<SockPacket>> merged = tagger.mergeDNSTag(packets, records);
-			for (String key : merged.keySet())
-			{
-				ArrayList<SockPacket> ps = merged.get(key);
+				System.out.println("others");
 				
-				PrintWriter pw1 = new PrintWriter(new File("dns-time/dns_" + key + "_conn_down"));
-				PrintWriter pw12 = new PrintWriter(new File("dns-time/dns_" + key + "_conn_up"));
-				for (SockPacket p : ps)
+				for (Connection conn : connTaggedPackets.keySet())
 				{
-					if (p.dir == SockPacket.PACKET_DIR_DOWN)
-					{
-						pw1.println((long) p.time + "\t" + p.seq);
-					}
-					else if (p.dir == SockPacket.PACKET_DIR_UP)
-					{
-						pw12.println((long) p.time + "\t" + p.seq);
-					}
+					conn.print(out, "OTHER", first_t, time6out, first_t);
+					conn.write("OTHER", first_t);
 				}
-				pw1.close();
-				pw12.close();
 			}
+			
 			
 			/*HashMap<DNSRecord, ArrayList<SockPacket>> dnsTaggedPackets = tagger.tagByDNS(packets, records);
 			System.out.println("Step 3: tag by dns, " + dnsTaggedPackets.size() + " types");
@@ -250,7 +267,18 @@ public class Analyser
 		{
 			e.printStackTrace();
 		}
+	}
+	
+	protected boolean belongsToDropbox(HashMap<String, ArrayList<Connection>> dnsTaggedConns)
+	{
+		for (ArrayList<Connection> conns : dnsTaggedConns.values())
+		{
+			if (conns.size() > 0)
+			{
+				return true;
+			}
+		}
 		
-		
+		return false;
 	}
 }
