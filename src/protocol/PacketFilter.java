@@ -13,6 +13,13 @@ import util.Util;
 
 public class PacketFilter
 {
+	public static void main(String[] args)
+	{
+		File file = new File("syn_att.pcap");
+		PacketFilter filter = new PacketFilter(new ArrayList<Connection>());
+		filter.filt(file, System.out);
+	}
+	
 	public static final int LIBPCAP_LINKTYPE_ETHERNET = 1;
 	public static final int LIBPCAP_LINKTYPE_LINUX_SLL = 113;
 	public static final int LINUX_SLL_OFFSET = 2;
@@ -96,6 +103,9 @@ public class PacketFilter
 				int tv_sec = bf.getInt(0), tv_usec = bf.getInt(4);
 				int caplen = bf.getInt(8), len = bf.getInt(12);
 				double time = ((double) tv_sec) * 1000 + ((double) tv_usec) / 1000;
+				
+//				System.out.println(tv_sec + " " + tv_usec + " " + time);
+//				System.exit(1);
 //				System.out.println("tv_sec = " + tv_sec + ", tv_usec = " + tv_usec
 //						+ ", caplen = " + caplen + ", len = " + len);
 				
@@ -350,8 +360,10 @@ public class PacketFilter
 					SockPacket packet = new SockPacket(srcPort, dstPort, srcIP, dstIP, 
 							time, len, datalen, packType, seq, ack, ackbit, payload);
 					
-//					if (Util.ipInt2Str(dstIP).equals("107.22.197.31") && srcPort == 6899)
-//					System.out.println(packet);
+//					if (Util.ipInt2Str(dstIP).equals("128.237.255.81"))
+//					{
+//						System.out.println(Util.ipInt2Str(packet.srcIP));
+//					}
 					
 					for (Connection conn : connections)
 					{
@@ -370,6 +382,13 @@ public class PacketFilter
 							break;
 						}
 					}
+					
+//					if (packet.srcPort == 51819 || packet.dstPort == 51819)
+//					{
+//						System.out.println(count);
+//						System.out.println(packet);
+//						System.out.println(ret);
+//					}
 				}
 				break;
 			case THIRD_PROTO_TYPE_UDP:

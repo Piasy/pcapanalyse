@@ -3,10 +3,14 @@ package protocol;
 public class SSLFragment
 {
 	long seqStart, seqEnd;
-	public SSLFragment(long seqs, long seqe)
+	long acks, acke;
+	public SSLFragment(long seqs, long seqe, long acks, long acke, double start)
 	{
 		seqStart = seqs;
 		seqEnd = seqe;
+		this.acks = acks;
+		this.acke = acke;
+		this.start = start;
 	}
 	
 	

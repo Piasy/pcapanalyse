@@ -64,6 +64,20 @@ public class Analyser
 				}
 			}
 			reader.close();
+			System.out.println(connections.size() + " conns");
+//			HashSet<Connection> hashconns = new HashSet<>();
+//			for (Connection conn : connections)
+//			{
+//				if (hashconns.contains(conn))
+//				{
+//					System.out.println("exist! " + conn);
+//				}
+//				else
+//				{
+//					hashconns.add(conn);
+//				}
+//			}
+//			System.out.println(hashconns.size());
 			
 			//step 1: filt packets according to connection log
 			PacketFilter filter = new PacketFilter(connections);
@@ -105,8 +119,8 @@ public class Analyser
 					+ "lastDataTime,finTime - lastDataTime(finish time),"
 					+ "lastUpSSLTime,finTime - lastUpSSLTime,"
 					+ "lastDownSSLTime,finTime - lastDownSSLTime,finTime,rstTime - finTime,rstTime,"
-					+ "netTime,upDataSize,downDataSize,up throughput,down throughput,"
-					+ "upGoodSize,downGoodSize,up goodput,down goodput");
+					+ "netTime,upDataSize,up throughput,downDataSize,down throughput,"
+					+ "upGoodSize,up goodput,up expected goodput,downGoodSize,down goodput,down expected goodput");
 			
 			//step 3: tag conns by dns
 			HashMap<String, ArrayList<Connection>> dnsTaggedConns = tagger.tagConnByDNS(connections, records);

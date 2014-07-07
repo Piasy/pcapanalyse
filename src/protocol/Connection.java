@@ -38,6 +38,7 @@ public class Connection
 	ArrayList<SockPacket> downPackets = new ArrayList<SockPacket>();
 	ArrayList<SSLFragment> upFragments = new ArrayList<SSLFragment>();
 	ArrayList<SSLFragment> downFragments = new ArrayList<SSLFragment>();
+	double extraWait = 0;
 	public void calc()
 	{
 		norm();
@@ -65,7 +66,7 @@ public class Connection
 				{
 					ByteBuffer upPayload = ByteBuffer.allocate((int) (pu.seq + pu.datalen));
 					int uplen = extractPayload(upPackets, upPayload);
-					extractSSLFrag(upPayload, uplen, upFragments);
+					extractSSLFrag(upPayload, uplen, upFragments, upPackets);
 					calcFragTime(upFragments, upAcks);
 					if (upFragments.size() > 0)
 					{
@@ -101,7 +102,7 @@ public class Connection
 				{
 					ByteBuffer downPayload = ByteBuffer.allocate((int) (pd.seq + pd.datalen));
 					int downlen = extractPayload(downPackets, downPayload);
-					extractSSLFrag(downPayload, downlen, downFragments);
+					extractSSLFrag(downPayload, downlen, downFragments, downPackets);
 					calcFragTime(downFragments, downAcks);
 					if (downFragments.size() > 0)
 					{
@@ -122,9 +123,77 @@ public class Connection
 			}
 		}
 		
-//		System.out.println(upFragments.size() + " " + downFragments.size());
+		if (upFragments.size() < downFragments.size())
+		{
+			for (SSLFragment f : upFragments)
+			{
+				double t1 = f.start;
+				double t2 = findNextFragTimeAfterACK(f, downFragments);
+				if (t2 == -1)
+				{
+					System.out.println("no next frag! @ " + f.seqStart);
+				}
+				else if (t2 == -2)
+				{
+					System.out.println("not found!");
+				}
+				else
+				{
+					System.out.println("Extra wait: " + (t2 - t1) + " @ " + f.seqStart);
+					extraWait += (t2 - t1);
+				}
+			}
+		}
+		else
+		{
+			for (SSLFragment f : downFragments)
+			{
+				double t1 = f.start;
+				double t2 = findNextFragTimeAfterACK(f, upFragments);
+				if (t2 == -1)
+				{
+					System.out.println("no next frag! @ " + f.seqStart);
+				}
+				else if (t2 == -2)
+				{
+					System.out.println("not found!");
+				}
+				else
+				{
+					System.out.println("Extra wait: " + (t2 - t1) + " @ " + f.seqStart);
+					extraWait += (t2 - t1);
+				}
+			}
+		}
+		
+		System.out.println(this);
+		System.out.println(upFragments.size() + " " + downFragments.size());
 //		System.out.println(lastUpSSLTime + " " + lastDownSSLTime + " " + finTime);
-//		System.out.println("========================================");
+		System.out.println("========================================");
+	}
+	
+	/**
+	 * >= 0: normal,
+	 * -1: no next fragment,
+	 * -2: not found
+	 * */
+	protected double findNextFragTimeAfterACK(SSLFragment frag, ArrayList<SSLFragment> frags)
+	{
+		for (int i = frags.size() - 1; i >= 0; i --)
+		{
+			if (frags.get(i).seqEnd <= frag.acks)
+			{
+				if (i < frags.size() - 1)
+				{
+					return frags.get(i + 1).start;
+				}
+				else
+				{
+					return -1;
+				}
+			}
+		}
+		return -2;
 	}
 	
 	protected ArrayList<SockPacket> extractAcks(ArrayList<SockPacket> packs)
@@ -207,7 +276,7 @@ public class Connection
 		return pos;
 	}
 	
-	protected void extractSSLFrag(ByteBuffer payload, int len, ArrayList<SSLFragment> fragments)
+	protected void extractSSLFrag(ByteBuffer payload, int len, ArrayList<SSLFragment> fragments, ArrayList<SockPacket> ps)
 	{
 		int pos = 0;
 		while (pos + 5 < len)
@@ -219,7 +288,21 @@ public class Connection
 			{
 				if (contType == PacketFilter.SSL_CONTENT_APPDATA)
 				{
-					fragments.add(new SSLFragment(pos + 1, pos + datalen + 6));
+					SockPacket packs = findPacketFromSeq(ps, pos + 1, false);
+					SockPacket packe = findPacketFromSeq(ps, pos + datalen + 6, true);
+					if (packs == null)
+					{
+						System.out.println("No packet found from seqs: " + (pos + 1));
+					}
+					else if (packe == null)
+					{
+						System.out.println("No packet found from seqe: " + (pos + datalen + 6));
+					}
+					else
+					{
+						//[seqs, seqe)
+						fragments.add(new SSLFragment(pos + 1, pos + datalen + 6, packs.ack, packe.ack, packs.time));
+					}
 				}
 				pos += (datalen + 5);
 			}
@@ -231,7 +314,21 @@ public class Connection
 		}
 	}
 	
-
+	protected SockPacket findPacketFromSeq(ArrayList<SockPacket> ps, int seq, boolean end)
+	{
+		for (SockPacket p : ps)
+		{
+			if (!end && p.seq <= seq && seq < p.seq + p.datalen)
+			{
+				return p;
+			}
+			if (end && p.seq < seq && seq <= p.seq + p.datalen)
+			{
+				return p;
+			}
+		}
+		return null;
+	}
 	
 	protected void calcFragTime(ArrayList<SSLFragment> fragments, ArrayList<SockPacket> acks)
 	{
@@ -688,25 +785,47 @@ public class Connection
 //			System.exit(1);
 //		}
 		
-		out.print("," + upDatalen + "," + downDatalen);
 		if (lastDataTime - synTime > 0)
 		{
-			out.print("," + Util.scaleTo2bit((double) upDatalen * 1000 / (lastDataTime - synTime)) 
-					+ "," + Util.scaleTo2bit((double) downDatalen * 1000 / (lastDataTime - synTime)));
+			out.print("," + upDatalen);
+			out.print("," + Util.scaleTo2bit((double) upDatalen * 1000 / (lastDataTime - synTime)));
+			out.print("," + downDatalen);
+			out.print("," + Util.scaleTo2bit((double) downDatalen * 1000 / (lastDataTime - synTime)));
 		}
 		else
 		{
-			out.print(",NaN,NaN");
+			out.print("," + upDatalen);
+			out.print(",NaN");
+			out.print("," + downDatalen);
+			out.print(",NaN");
 		}
 		
-		out.print("," + upSeqEnd + "," + downSeqEnd);
 		if (lastDataTime - synTime > 0)
 		{
-			out.print("," + Util.scaleTo2bit((double) (upSeqEnd)  * 1000 / (lastDataTime - synTime)) 
-					+ "," + Util.scaleTo2bit((double) (downSeqEnd)  * 1000 / (lastDataTime - synTime)));
+			if (lastDataTime - synTime - extraWait > 0)
+			{
+				out.print("," + upSeqEnd);
+				out.print("," + Util.scaleTo2bit((double) upSeqEnd * 1000 / (lastDataTime - synTime)));
+				out.print("," + Util.scaleTo2bit((double) upSeqEnd * 1000 / (lastDataTime - synTime - extraWait)));
+				out.print("," + downSeqEnd);
+				out.print("," + Util.scaleTo2bit((double) downSeqEnd * 1000 / (lastDataTime - synTime)));
+				out.print("," + Util.scaleTo2bit((double) downSeqEnd * 1000 / (lastDataTime - synTime - extraWait)));
+			}
+			else
+			{
+				out.print("," + upSeqEnd);
+				out.print("," + Util.scaleTo2bit((double) upSeqEnd * 1000 / (lastDataTime - synTime - extraWait)));
+				out.print("," + Float.NaN);
+				out.print("," + downDatalen);
+				out.print("," + Util.scaleTo2bit((double) downSeqEnd * 1000 / (lastDataTime - synTime - extraWait)));
+				out.print("," + Float.NaN);
+			}
 		}
 		else
 		{
+			out.print("," + upSeqEnd);
+			out.print(",NaN,NaN");
+			out.print("," + downDatalen);
 			out.print(",NaN,NaN");
 		}
 		out.println();
