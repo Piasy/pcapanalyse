@@ -15,7 +15,15 @@ public class Util
 
 	public static float scaleTo2bit(double value)
 	{
-		return new BigDecimal(value).setScale(2, BigDecimal.ROUND_HALF_UP).floatValue();
+		try
+		{
+			return new BigDecimal(value).setScale(2, BigDecimal.ROUND_HALF_UP).floatValue();
+		}
+		catch (NumberFormatException e)
+		{
+			e.printStackTrace();
+		}
+		return -1.0f;
 	}
 	
 	public static ByteBuffer bf = ByteBuffer.allocate(4);

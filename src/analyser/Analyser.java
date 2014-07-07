@@ -20,15 +20,26 @@ import util.Util;
 
 public class Analyser
 {
-
+	File pwd;
+	public Analyser(File pwd)
+	{
+		this.pwd = pwd;
+	}
+	
 	public static void main(String[] args)
 	{
-		File file = new File("trace.pcap");
-		File connsLog = new File("connection_log.csv");
-//		System.out.println(System.currentTimeMillis());
-		new Analyser().analyse(file, connsLog);
+		Analyser analyser = new Analyser(new File("."));
+		File file = new File("./trace.pcap");
+		File connsLog = new File("./connection_log.csv");
+		analyser.analyse(file, connsLog);
 	}
 
+	ArrayList<ArrayList<Float>> gps = new ArrayList<ArrayList<Float>>();
+	public ArrayList<ArrayList<Float>> getAllGoodputs()
+	{
+		return gps;
+	}
+	
 	/**
 	 * @param file
 	 * @param connsLog
@@ -37,7 +48,7 @@ public class Analyser
 	{
 		try
 		{
-			PrintStream out = new PrintStream(new File("out.csv"));
+			PrintStream out = new PrintStream(new File(pwd.getAbsolutePath() + "/out.csv"));
 			
 			//read connection log
 			ArrayList<Connection> connections = new ArrayList<Connection>();
@@ -95,9 +106,9 @@ public class Analyser
 //			}
 					
 			
-			File seq_time = new File("seq-time");
+			File seq_time = new File(pwd.getAbsolutePath() + "/seq-time");
 			seq_time.mkdir();
-			File dns_time = new File("dns-time");
+			File dns_time = new File(pwd.getAbsolutePath() + "/dns-time");
 			dns_time.mkdir();
 			
 			
@@ -124,7 +135,7 @@ public class Analyser
 			
 			//step 3: tag conns by dns
 			HashMap<String, ArrayList<Connection>> dnsTaggedConns = tagger.tagConnByDNS(connections, records);
-			PrintStream time6out = new PrintStream(new File("data.csv"));
+			PrintStream time6out = new PrintStream(new File(pwd.getAbsolutePath() + "/data.csv"));
 			//time6out.println("synTime - baseTime,firstDataTime - synTime,lastDataTime - firstDataTime,"
 			//		+ "finTime - lastDataTime,rstTime - finTime");
 			
@@ -137,14 +148,18 @@ public class Analyser
 					for (Connection conn : dnsTaggedConns.get(name))
 					{
 						conn.print(out, name, first_t, time6out, first_t);
-						conn.write(name, first_t);
+						conn.write(name, first_t, pwd);
+						if (name.startsWith("dl") || name.startsWith("api-content"))
+						{
+							gps.add(conn.getGoodputs());
+						}
 					}
 				}
 				
 				//step 4: extract ssl fragment, done by step 2, conn.calc()
 				
 				//step 5: output total data goodput
-				PrintStream totalGoodputout = new PrintStream(new File("totalGoodput.csv"));
+				PrintStream totalGoodputout = new PrintStream(new File(pwd.getAbsolutePath() + "/totalGoodput.csv"));
 				double dataStreamSyn = -1, dataStreamLastData = -1;
 				long totalSize = 0;
 				for (Connection conn : dnsTaggedConns.get("dl-clientX.dropbox.com"))
@@ -206,8 +221,8 @@ public class Analyser
 				{
 					ArrayList<SockPacket> ps = merged.get(key);
 					
-					PrintWriter pw1 = new PrintWriter(new File("dns-time/dns_" + key + "_conn_down"));
-					PrintWriter pw12 = new PrintWriter(new File("dns-time/dns_" + key + "_conn_up"));
+					PrintWriter pw1 = new PrintWriter(new File(pwd.getAbsolutePath() + "/dns-time/dns_" + key + "_conn_down"));
+					PrintWriter pw12 = new PrintWriter(new File(pwd.getAbsolutePath() + "/dns-time/dns_" + key + "_conn_up"));
 					for (SockPacket p : ps)
 					{
 						if (p.dir == SockPacket.PACKET_DIR_DOWN)
@@ -230,7 +245,7 @@ public class Analyser
 				for (Connection conn : connTaggedPackets.keySet())
 				{
 					conn.print(out, "OTHER", first_t, time6out, first_t);
-					conn.write("OTHER", first_t);
+					conn.write("OTHER", first_t, pwd);
 				}
 			}
 			

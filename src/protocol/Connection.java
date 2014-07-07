@@ -39,6 +39,7 @@ public class Connection
 	ArrayList<SSLFragment> upFragments = new ArrayList<SSLFragment>();
 	ArrayList<SSLFragment> downFragments = new ArrayList<SSLFragment>();
 	double extraWait = 0;
+	boolean isSendConn = false;
 	public void calc()
 	{
 		norm();
@@ -64,7 +65,7 @@ public class Connection
 				SockPacket pu = upPackets.get(upPackets.size() - 1);
 				if (pu.seq + pu.datalen > 0)
 				{
-					ByteBuffer upPayload = ByteBuffer.allocate((int) (pu.seq + pu.datalen));
+					ByteBuffer upPayload = ByteBuffer.allocate((int) (pu.seq + pu.datalen + 1024));
 					int uplen = extractPayload(upPackets, upPayload);
 					extractSSLFrag(upPayload, uplen, upFragments, upPackets);
 					calcFragTime(upFragments, upAcks);
@@ -100,7 +101,7 @@ public class Connection
 				SockPacket pd = downPackets.get(downPackets.size() - 1);
 				if (pd.seq + pd.datalen > 0)
 				{
-					ByteBuffer downPayload = ByteBuffer.allocate((int) (pd.seq + pd.datalen));
+					ByteBuffer downPayload = ByteBuffer.allocate((int) (pd.seq + pd.datalen + 1024));
 					int downlen = extractPayload(downPackets, downPayload);
 					extractSSLFrag(downPayload, downlen, downFragments, downPackets);
 					calcFragTime(downFragments, downAcks);
@@ -131,45 +132,94 @@ public class Connection
 				double t2 = findNextFragTimeAfterACK(f, downFragments);
 				if (t2 == -1)
 				{
-					System.out.println("no next frag! @ " + f.seqStart);
+					//System.out.println("no next frag! @ " + f.seqStart);
 				}
 				else if (t2 == -2)
 				{
-					System.out.println("not found!");
+					//System.out.println("not found!");
 				}
 				else
 				{
-					System.out.println("Extra wait: " + (t2 - t1) + " @ " + f.seqStart);
+					//System.out.println("Extra wait: " + (t2 - t1) + " @ " + f.seqStart);
 					extraWait += (t2 - t1);
 				}
 			}
 		}
 		else
 		{
+			isSendConn = true;
 			for (SSLFragment f : downFragments)
 			{
 				double t1 = f.start;
 				double t2 = findNextFragTimeAfterACK(f, upFragments);
 				if (t2 == -1)
 				{
-					System.out.println("no next frag! @ " + f.seqStart);
+					//System.out.println("no next frag! @ " + f.seqStart);
 				}
 				else if (t2 == -2)
 				{
-					System.out.println("not found!");
+					//System.out.println("not found!");
 				}
 				else
 				{
-					System.out.println("Extra wait: " + (t2 - t1) + " @ " + f.seqStart);
+					//System.out.println("Extra wait: " + (t2 - t1) + " @ " + f.seqStart);
 					extraWait += (t2 - t1);
 				}
 			}
 		}
 		
-		System.out.println(this);
-		System.out.println(upFragments.size() + " " + downFragments.size());
+//		System.out.println(this);
+//		System.out.println(upFragments.size() + " " + downFragments.size());
 //		System.out.println(lastUpSSLTime + " " + lastDownSSLTime + " " + finTime);
-		System.out.println("========================================");
+		if (isSendConn)
+		{
+			System.out.print(Util.scaleTo2bit((double) upSeqEnd * 1000 / (lastDataTime - synTime)));
+			System.out.print("," + Util.scaleTo2bit((double) upSeqEnd * 1000 / (lastDataTime - synTime - extraWait)));
+			if (lastDataTime - synTime > 0)
+			{
+				goodputs.add(Util.scaleTo2bit((double) upSeqEnd * 1000 / (lastDataTime - synTime)));
+			}
+			else
+			{
+				goodputs.add(-1.0f);
+			}
+			if (lastDataTime - synTime - extraWait > 0)
+			{
+				goodputs.add(Util.scaleTo2bit((double) upSeqEnd * 1000 / (lastDataTime - synTime - extraWait)));
+			}
+			else
+			{
+				goodputs.add(-1.0f);
+			}
+		}
+		else
+		{
+			System.out.print(Util.scaleTo2bit((double) downSeqEnd * 1000 / (lastDataTime - synTime)));
+			System.out.print("," + Util.scaleTo2bit((double) downSeqEnd * 1000 / (lastDataTime - synTime - extraWait)));
+			if (lastDataTime - synTime > 0)
+			{
+				goodputs.add(Util.scaleTo2bit((double) downSeqEnd * 1000 / (lastDataTime - synTime)));
+			}
+			else
+			{
+				goodputs.add(-1.0f);
+			}
+			if (lastDataTime - synTime - extraWait > 0)
+			{
+				goodputs.add(Util.scaleTo2bit((double) downSeqEnd * 1000 / (lastDataTime - synTime - extraWait)));
+			}
+			else
+			{
+				goodputs.add(-1.0f);
+			}
+		}
+		System.out.println("\n========================================");
+	}
+	
+	ArrayList<Float> goodputs = new ArrayList<Float>();
+	public ArrayList<Float> getGoodputs()
+	{
+		return goodputs;
 	}
 	
 	/**
@@ -831,15 +881,15 @@ public class Connection
 		out.println();
 	}
 	
-	public void write(String name, double first_t)
+	public void write(String name, double first_t, File pwd)
 	{
 		try
 		{
 			String filename = "seq-time/" + name + "_" + Util.ipInt2Str(srcIP) + "_" + srcPort + "--" 
 					+ Util.ipInt2Str(dstIP) + "_" + dstPort;
 			
-			PrintWriter pw1 = new PrintWriter(new File(filename + "_up"));
-			PrintWriter pw2 = new PrintWriter(new File(filename + "_down"));
+			PrintWriter pw1 = new PrintWriter(new File(pwd.getAbsolutePath() + "/" + filename + "_up"));
+			PrintWriter pw2 = new PrintWriter(new File(pwd.getAbsolutePath() + "/" + filename + "_down"));
 			for (SockPacket p : packets)
 			{
 				if (p.dir == SockPacket.PACKET_DIR_UP)
